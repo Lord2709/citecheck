@@ -1,0 +1,2 @@
+participant,task_id,started_at,ended_at,seconds,outcome,verdict_shown,participant_agrees,gold_label,participant_correct,validated_backend,needed_help_notes,evidence_files
+P01,T1-1,2026-09-29T15:02:11-04:00,2026-09-29T15:05:40-04:00,209,completed,SUPPORTS,y,SUPPORT,y,y,,notes/P01.md;screenshots/P01_2026-09-29.png
