@@ -1,0 +1,12 @@
+# Light dependencies for CI: heavy model libraries (torch/transformers) are optional and their
+# tests skip themselves when the library is missing.
+rank-bm25==0.2.2
+requests==2.32.3
+numpy>=1.24
+pandas>=2.0
+nltk>=3.8
+pyyaml>=6.0
+scikit-learn>=1.3
+streamlit>=1.35
+matplotlib>=3.7
+pytest>=8.0
