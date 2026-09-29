@@ -1,0 +1,8 @@
+{"id": 101, "claim": "Longer sleep improves recall of word pairs.", "evidence": {"7": [{"sentences": [1], "label": "SUPPORT"}]}, "cited_doc_ids": [7]}
+{"id": 102, "claim": "Sleep duration is unrelated to memory.", "evidence": {"7": [{"sentences": [1, 2], "label": "CONTRADICT"}]}, "cited_doc_ids": [7]}
+{"id": 103, "claim": "Higher microbial diversity is found in depressed patients.", "evidence": {"8": [{"sentences": [1], "label": "CONTRADICT"}]}, "cited_doc_ids": [8]}
+{"id": 104, "claim": "Coral bleaching worsens when the sea is warmer than usual.", "evidence": {"9": [{"sentences": [1], "label": "SUPPORT"}]}, "cited_doc_ids": [9]}
+{"id": 105, "claim": "Coral reefs recover within days after bleaching.", "evidence": {"9": [{"sentences": [2], "label": "CONTRADICT"}]}, "cited_doc_ids": [9]}
+{"id": 106, "claim": "Convolutional networks predict protein contacts better than co-evolution methods.", "evidence": {"10": [{"sentences": [2], "label": "SUPPORT"}]}, "cited_doc_ids": [10]}
+{"id": 107, "claim": "Probiotics cure depression completely.", "evidence": {}, "cited_doc_ids": [8]}
+{"id": 108, "claim": "Heatwaves cause coral disease outbreaks.", "evidence": {}, "cited_doc_ids": [9]}

@@ -1,0 +1,10 @@
+{"id": 1, "claim": "Zorvex supplementation increases bone density in mice.", "evidence": {"1": [{"sentences": [2], "label": "SUPPORT"}]}, "cited_doc_ids": [1]}
+{"id": 2, "claim": "Glimmerine raises systolic blood pressure.", "evidence": {"2": [{"sentences": [3], "label": "CONTRADICT"}]}, "cited_doc_ids": [2]}
+{"id": 3, "claim": "Loss of quillon protein impairs neuron survival.", "evidence": {"3": [{"sentences": [1, 2], "label": "SUPPORT"}]}, "cited_doc_ids": [3]}
+{"id": 4, "claim": "Vantrol treatment lowers LDL cholesterol in adults.", "evidence": {"4": [{"sentences": [2], "label": "CONTRADICT"}]}, "cited_doc_ids": [4]}
+{"id": 5, "claim": "Meditation reduces cortisol in adults.", "evidence": {"5": [{"sentences": [2], "label": "SUPPORT"}]}, "cited_doc_ids": [5]}
+{"id": 6, "claim": "Zorvex improves memory in mice.", "evidence": {}, "cited_doc_ids": [1]}
+{"id": 7, "claim": "Glimmerine is metabolised in the liver.", "evidence": {}, "cited_doc_ids": [2]}
+{"id": 8, "claim": "Quillon is expressed in kidney tissue.", "evidence": {}, "cited_doc_ids": [3]}
+{"id": 9, "claim": "The nalbrix vaccine reduces influenza infection in older adults.", "evidence": {"6": [{"sentences": [1], "label": "SUPPORT"}]}, "cited_doc_ids": [6]}
+{"id": 10, "claim": "The nalbrix vaccine increases autoimmune events.", "evidence": {"6": [{"sentences": [2], "label": "CONTRADICT"}]}, "cited_doc_ids": [6]}
