@@ -1,0 +1,26 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# data we do not redistribute in git (re-download with data/fetch_scifact.py). MANIFEST.json IS committed.
+data/scifact/*.jsonl
+data/scifact/*.tar.gz
+data/cache/
+
+# heavy / regenerable artifacts
+eval/cache/
+models/
+logs/
+
+# secrets and OS junk
+.env
+*.log
+.DS_Store
+Thumbs.db
+
+# raw participant material must NEVER be committed (anonymize first, see evidence/README.md)
+evidence/**/raw_unredacted/

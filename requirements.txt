@@ -1,3 +1,26 @@
+# --- already pinned by the team (Session 4) ---
 rank-bm25==0.2.2
 requests==2.32.3
 arxiv==2.1.3
+
+# --- core ---
+numpy>=1.24
+pandas>=2.0
+nltk>=3.8            # Porter stemmer only; no corpus downloads needed
+pyyaml>=6.0
+
+# --- NLP models (retrieval + verification) ---
+torch>=2.1
+transformers>=4.40
+sentence-transformers>=3.0
+sentencepiece>=0.2   # DeBERTa-v3 tokenizer
+protobuf>=4.25       # DeBERTa-v3 tokenizer conversion
+scikit-learn>=1.3    # used to cross-check our metrics in tests
+
+# --- app / plots ---
+streamlit>=1.35
+matplotlib>=3.7
+tqdm>=4.66
+
+# --- dev ---
+pytest>=8.0
