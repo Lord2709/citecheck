@@ -1,0 +1,317 @@
+{
+  "name": "lexical",
+  "created_utc": "2026-09-29T19:14:31+00:00",
+  "split": "dev",
+  "synthetic_fixture": false,
+  "partial": false,
+  "config": {
+    "retriever": "bm25",
+    "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "verifier": "lexical",
+    "k": 3,
+    "sentences_per_paper": 3,
+    "tau": 0.65,
+    "margin": 0.0
+  },
+  "tau_tuning": {
+    "method": "grid_max_macro_f1",
+    "split": "train",
+    "n_claims": 200,
+    "tuned_macro_f1": 0.5466628668234101,
+    "leak": false
+  },
+  "data": {
+    "dir": "data\\scifact",
+    "sha256_prefix": {
+      "corpus": "b8d6c89624cb2ed7",
+      "dev": "86f0435d08fdb65d"
+    },
+    "n_corpus": 5183,
+    "n_claims": 300,
+    "label_distribution": {
+      "NEI": 112,
+      "SUPPORT": 124,
+      "CONTRADICT": 64
+    }
+  },
+  "claim_level": {
+    "n": 300,
+    "n_mixed_excluded": 0,
+    "macro_f1": 0.5197514878924174,
+    "macro_f1_ci95": [
+      0.4559336398018317,
+      0.5796218253087888
+    ],
+    "accuracy": 0.5566666666666666,
+    "per_class": {
+      "SUPPORT": {
+        "precision": 0.6388888888888888,
+        "recall": 0.5564516129032258,
+        "f1": 0.5948275862068966,
+        "support": 124
+      },
+      "CONTRADICT": {
+        "precision": 0.39215686274509803,
+        "recall": 0.3125,
+        "f1": 0.34782608695652173,
+        "support": 64
+      },
+      "NEI": {
+        "precision": 0.5531914893617021,
+        "recall": 0.6964285714285714,
+        "f1": 0.6166007905138341,
+        "support": 112
+      }
+    },
+    "confusion_rows_gold_cols_pred": {
+      "labels": [
+        "SUPPORT",
+        "CONTRADICT",
+        "NEI"
+      ],
+      "matrix": [
+        [
+          69,
+          18,
+          37
+        ],
+        [
+          18,
+          20,
+          26
+        ],
+        [
+          21,
+          13,
+          78
+        ]
+      ]
+    },
+    "false_support_rate": 0.2215909090909091,
+    "support_precision": 0.6388888888888888,
+    "coverage": 0.53
+  },
+  "retrieval": {
+    "n_claims": 188,
+    "recall@1": 0.7216312056737589,
+    "hit@1": 0.7340425531914894,
+    "precision@1": 0.7340425531914894,
+    "recall@3": 0.8408687943262412,
+    "hit@3": 0.8563829787234043,
+    "precision@3": 0.2943262411347523,
+    "recall@5": 0.8820921985815603,
+    "hit@5": 0.898936170212766,
+    "precision@5": 0.18617021276595722,
+    "recall@10": 0.9405141843971631,
+    "hit@10": 0.9521276595744681,
+    "precision@10": 0.10159574468085107,
+    "recall@20": 0.9578014184397163,
+    "hit@20": 0.9680851063829787,
+    "precision@20": 0.0518617021276596,
+    "mrr": 0.8096055439210537,
+    "ndcg@10": 0.8383783006706874,
+    "avg_gold_docs_per_claim": 1.1117021276595744
+  },
+  "abstract_level": {
+    "label_only": {
+      "precision": 0.325,
+      "recall": 0.37320574162679426,
+      "f1": 0.3474387527839644,
+      "n_pred": 240,
+      "n_gold": 209,
+      "n_correct": 78
+    },
+    "label_and_rationale": {
+      "precision": 0.2791666666666667,
+      "recall": 0.32057416267942584,
+      "f1": 0.2984409799554566,
+      "n_pred": 240,
+      "n_gold": 209,
+      "n_correct": 67
+    }
+  },
+  "tau_sweep_analysis_only": [
+    {
+      "tau": 0.05,
+      "macro_f1": 0.306483809212364,
+      "false_support_rate": 0.7102272727272727,
+      "support_precision": 0.43946188340807174,
+      "coverage": 1.0
+    },
+    {
+      "tau": 0.1,
+      "macro_f1": 0.306483809212364,
+      "false_support_rate": 0.7102272727272727,
+      "support_precision": 0.43946188340807174,
+      "coverage": 1.0
+    },
+    {
+      "tau": 0.15,
+      "macro_f1": 0.42401703473838626,
+      "false_support_rate": 0.5795454545454546,
+      "support_precision": 0.48484848484848486,
+      "coverage": 0.9166666666666666
+    },
+    {
+      "tau": 0.2,
+      "macro_f1": 0.42401703473838626,
+      "false_support_rate": 0.5795454545454546,
+      "support_precision": 0.48484848484848486,
+      "coverage": 0.9166666666666666
+    },
+    {
+      "tau": 0.25,
+      "macro_f1": 0.42401703473838626,
+      "false_support_rate": 0.5795454545454546,
+      "support_precision": 0.48484848484848486,
+      "coverage": 0.9166666666666666
+    },
+    {
+      "tau": 0.3,
+      "macro_f1": 0.42401703473838626,
+      "false_support_rate": 0.5795454545454546,
+      "support_precision": 0.48484848484848486,
+      "coverage": 0.9166666666666666
+    },
+    {
+      "tau": 0.35,
+      "macro_f1": 0.42401703473838626,
+      "false_support_rate": 0.5795454545454546,
+      "support_precision": 0.48484848484848486,
+      "coverage": 0.9166666666666666
+    },
+    {
+      "tau": 0.4,
+      "macro_f1": 0.42401703473838626,
+      "false_support_rate": 0.5795454545454546,
+      "support_precision": 0.48484848484848486,
+      "coverage": 0.9166666666666666
+    },
+    {
+      "tau": 0.45,
+      "macro_f1": 0.42401703473838626,
+      "false_support_rate": 0.5795454545454546,
+      "support_precision": 0.48484848484848486,
+      "coverage": 0.9166666666666666
+    },
+    {
+      "tau": 0.5,
+      "macro_f1": 0.42401703473838626,
+      "false_support_rate": 0.5795454545454546,
+      "support_precision": 0.48484848484848486,
+      "coverage": 0.9166666666666666
+    },
+    {
+      "tau": 0.55,
+      "macro_f1": 0.4783383435819266,
+      "false_support_rate": 0.4602272727272727,
+      "support_precision": 0.5290697674418605,
+      "coverage": 0.82
+    },
+    {
+      "tau": 0.6,
+      "macro_f1": 0.5308813288415036,
+      "false_support_rate": 0.3068181818181818,
+      "support_precision": 0.6058394160583942,
+      "coverage": 0.6633333333333333
+    },
+    {
+      "tau": 0.65,
+      "macro_f1": 0.5197514878924174,
+      "false_support_rate": 0.2215909090909091,
+      "support_precision": 0.6388888888888888,
+      "coverage": 0.53
+    },
+    {
+      "tau": 0.7,
+      "macro_f1": 0.478494359398882,
+      "false_support_rate": 0.13068181818181818,
+      "support_precision": 0.6933333333333334,
+      "coverage": 0.38666666666666666
+    },
+    {
+      "tau": 0.75,
+      "macro_f1": 0.427776155651676,
+      "false_support_rate": 0.0625,
+      "support_precision": 0.7659574468085106,
+      "coverage": 0.25
+    },
+    {
+      "tau": 0.8,
+      "macro_f1": 0.31110240612535767,
+      "false_support_rate": 0.03409090909090909,
+      "support_precision": 0.75,
+      "coverage": 0.11
+    },
+    {
+      "tau": 0.85,
+      "macro_f1": 0.23204913456169737,
+      "false_support_rate": 0.011363636363636364,
+      "support_precision": 0.8181818181818182,
+      "coverage": 0.04666666666666667
+    },
+    {
+      "tau": 0.9,
+      "macro_f1": 0.22693549794885226,
+      "false_support_rate": 0.011363636363636364,
+      "support_precision": 0.8,
+      "coverage": 0.043333333333333335
+    },
+    {
+      "tau": 0.95,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    }
+  ],
+  "timing": {
+    "retrieval_ms_per_claim": 14.16023133333332,
+    "verify_ms_per_claim": 1.0049043333333312
+  },
+  "provenance": {
+    "git_commit": "a999d1fe5ea4bd21bbf8f4de62f7fe92c1c070f2",
+    "versions": {
+      "python": "3.9.2",
+      "platform": "Windows-10-10.0.26100-SP0",
+      "torch": "2.8.0+cpu",
+      "transformers": "4.57.6",
+      "sentence_transformers": "5.1.2",
+      "rank_bm25": null,
+      "numpy": "2.0.2"
+    },
+    "argv": [
+      "--name",
+      "lexical",
+      "--retriever",
+      "bm25",
+      "--verifier",
+      "lexical",
+      "--oracle",
+      "--compare-with",
+      "eval/results/majority"
+    ],
+    "seed": 0
+  },
+  "error_attribution": {
+    "end_to_end": 0.5197514878924174,
+    "oracle_doc": 0.539447581667935,
+    "oracle_rationale": 0.38129541024277863,
+    "loss_from_retrieval": 0.01969609377551762,
+    "loss_from_sentence_selection": -0.15815217142515642,
+    "remaining_gap_is_verifier": 0.6187045897572214,
+    "reading": "macro-F1 with the gold paper(s) supplied (oracle_doc) or gold paper+sentences (oracle_rationale). loss_from_retrieval = what better retrieval could buy; remaining_gap_is_verifier = what only a better classifier can fix."
+  },
+  "paired_comparisons": [
+    {
+      "diff": 0.3385217144296342,
+      "ci95": [
+        0.2722467432956267,
+        0.39760940949436746
+      ],
+      "p_a_better": 1.0,
+      "vs": "majority",
+      "n": 300
+    }
+  ]
+}
