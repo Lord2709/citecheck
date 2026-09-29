@@ -1,0 +1,291 @@
+{
+  "name": "majority",
+  "created_utc": "2026-09-29T19:14:07+00:00",
+  "split": "dev",
+  "synthetic_fixture": false,
+  "partial": false,
+  "config": {
+    "retriever": "bm25",
+    "embed_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "verifier": "majority",
+    "k": 3,
+    "sentences_per_paper": 3,
+    "tau": 0.5,
+    "margin": 0.0
+  },
+  "tau_tuning": {
+    "method": "default_0.5",
+    "split": null
+  },
+  "data": {
+    "dir": "data\\scifact",
+    "sha256_prefix": {
+      "corpus": "b8d6c89624cb2ed7",
+      "dev": "86f0435d08fdb65d"
+    },
+    "n_corpus": 5183,
+    "n_claims": 300,
+    "label_distribution": {
+      "NEI": 112,
+      "SUPPORT": 124,
+      "CONTRADICT": 64
+    }
+  },
+  "claim_level": {
+    "n": 300,
+    "n_mixed_excluded": 0,
+    "macro_f1": 0.1812297734627832,
+    "macro_f1_ci95": [
+      0.16161616161616163,
+      0.20046620046620048
+    ],
+    "accuracy": 0.37333333333333335,
+    "per_class": {
+      "SUPPORT": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 124
+      },
+      "CONTRADICT": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 64
+      },
+      "NEI": {
+        "precision": 0.37333333333333335,
+        "recall": 1.0,
+        "f1": 0.5436893203883496,
+        "support": 112
+      }
+    },
+    "confusion_rows_gold_cols_pred": {
+      "labels": [
+        "SUPPORT",
+        "CONTRADICT",
+        "NEI"
+      ],
+      "matrix": [
+        [
+          0,
+          0,
+          124
+        ],
+        [
+          0,
+          0,
+          64
+        ],
+        [
+          0,
+          0,
+          112
+        ]
+      ]
+    },
+    "false_support_rate": 0.0,
+    "support_precision": 0.0,
+    "coverage": 0.0
+  },
+  "retrieval": {
+    "n_claims": 188,
+    "recall@1": 0.7216312056737589,
+    "hit@1": 0.7340425531914894,
+    "precision@1": 0.7340425531914894,
+    "recall@3": 0.8408687943262412,
+    "hit@3": 0.8563829787234043,
+    "precision@3": 0.2943262411347523,
+    "recall@5": 0.8820921985815603,
+    "hit@5": 0.898936170212766,
+    "precision@5": 0.18617021276595722,
+    "recall@10": 0.9405141843971631,
+    "hit@10": 0.9521276595744681,
+    "precision@10": 0.10159574468085107,
+    "recall@20": 0.9578014184397163,
+    "hit@20": 0.9680851063829787,
+    "precision@20": 0.0518617021276596,
+    "mrr": 0.8096055439210537,
+    "ndcg@10": 0.8383783006706874,
+    "avg_gold_docs_per_claim": 1.1117021276595744
+  },
+  "abstract_level": {
+    "label_only": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_pred": 0,
+      "n_gold": 209,
+      "n_correct": 0
+    },
+    "label_and_rationale": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_pred": 0,
+      "n_gold": 209,
+      "n_correct": 0
+    }
+  },
+  "tau_sweep_analysis_only": [
+    {
+      "tau": 0.05,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.1,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.15,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.2,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.25,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.3,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.35,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.4,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.45,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.5,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.55,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.6,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.65,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.7,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.75,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.8,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.85,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.9,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    },
+    {
+      "tau": 0.95,
+      "macro_f1": 0.1812297734627832,
+      "false_support_rate": 0.0,
+      "support_precision": 0.0,
+      "coverage": 0.0
+    }
+  ],
+  "timing": {
+    "retrieval_ms_per_claim": 13.7006716666667,
+    "verify_ms_per_claim": 0.5419019999999956
+  },
+  "provenance": {
+    "git_commit": "a999d1fe5ea4bd21bbf8f4de62f7fe92c1c070f2",
+    "versions": {
+      "python": "3.9.2",
+      "platform": "Windows-10-10.0.26100-SP0",
+      "torch": "2.8.0+cpu",
+      "transformers": "4.57.6",
+      "sentence_transformers": "5.1.2",
+      "rank_bm25": null,
+      "numpy": "2.0.2"
+    },
+    "argv": [
+      "--name",
+      "majority",
+      "--retriever",
+      "bm25",
+      "--verifier",
+      "majority"
+    ],
+    "seed": 0
+  },
+  "paired_comparisons": []
+}

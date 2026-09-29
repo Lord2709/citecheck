@@ -1,6 +1,6 @@
 # Data card: CiteCheck
 
-Owner: Data & Evaluation (Sahil).  Last reviewed: 2026-09-28. 
+Owner: Data & Evaluation (Sahil).  Last reviewed: 2026-09-29.
 
 ## What we use
 
@@ -8,8 +8,20 @@ Owner: Data & Evaluation (Sahil).  Last reviewed: 2026-09-28.
 |---|---|---|---|
 | **SciFact** (Wadden et al., EMNLP 2020, arXiv:2004.14974) | ~1.4k expert-written scientific claims, each labelled against the abstracts of the papers it cites, plus a corpus of ~5.2k abstracts | SciFact claims are *citation sentences re-written into atomic claims* and `cited_doc_ids` are the papers that citation pointed to. That is our exact product question: **does the cited paper support this claim?** | Claims + evidence annotations: **CC BY 4.0**. Abstracts (S2ORC): **ODC-By 1.0**. (Verified from `LICENSE.md` in github.com/allenai/scifact on 2026-09-28.) |
 | **SciFact-Open** (Wadden et al., 2022) | Same task against a ~500k-abstract corpus | Stretch goal: a harder, more realistic retrieval test | see its repo before use |
-| Pretrained models | NLI checkpoint `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`, embedder `sentence-transformers/all-MiniLM-L6-v2`, reranker `cross-encoder/ms-marco-MiniLM-L-6-v2` | zero-shot verifier / retrieval | Believed MIT / Apache-2.0: **confirm on each model card and paste the license here before demo day** |
+| Pretrained models | NLI checkpoint `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli`, embedder `sentence-transformers/all-MiniLM-L6-v2`, reranker `cross-encoder/ms-marco-MiniLM-L-6-v2` | zero-shot verifier / retrieval | See "Model licenses" below (checked on each Hugging Face model card, 2026-09-29) |
 | Live paper lookups (DOI / arXiv) | OpenAlex, Semantic Scholar, arXiv public APIs | letting a user check *their own* paper | API terms apply; we cache and never redistribute abstracts |
+
+### Model licenses
+
+Read from the `license:` field of each model card's metadata (README front-matter) and the Hugging Face
+model API on **2026-09-29**. Only the model card's own declaration was checked; the licenses of the
+datasets each model was trained on were **not verified**.
+
+| Model | License on model card | Revision checked (commit sha) | Note |
+|---|---|---|---|
+| `MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` | **MIT** | `6f5cf0a2b59c` | |
+| `sentence-transformers/all-MiniLM-L6-v2` | **Apache-2.0** | `1110a243fdf4` | |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | **Apache-2.0** | `233902d25c44` | Repo was renamed to `cross-encoder/ms-marco-MiniLM-L6-v2`; the old id (used in `src/retrieval.py`) still redirects |
 
 ## Files (`data/scifact/`, created by `python -m data.fetch_scifact`)
 

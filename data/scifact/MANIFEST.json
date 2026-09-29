@@ -1,0 +1,32 @@
+{
+  "dataset": "SciFact (Wadden et al., EMNLP 2020)",
+  "source": "https://scifact.s3-us-west-2.amazonaws.com/release/latest/data.tar.gz",
+  "fetched_utc": "2026-09-29T19:13:54+00:00",
+  "license": {
+    "claims_and_evidence_annotations": "CC BY 4.0",
+    "abstracts (S2ORC)": "ODC-By 1.0",
+    "source": "https://github.com/allenai/scifact/blob/master/LICENSE.md"
+  },
+  "files": {
+    "corpus.jsonl": {
+      "sha256": "b8d6c89624cb2ed74dee8938effc4f5d8bd2086887880af8110d64be4ceade62",
+      "n_rows": 5183,
+      "bytes": 8307875
+    },
+    "claims_train.jsonl": {
+      "sha256": "f4c8fa82d8bd0653a9cc8d61a6ea48c25eacea64e90af5dbf390ebb1b74372f0",
+      "n_rows": 809,
+      "bytes": 175616
+    },
+    "claims_dev.jsonl": {
+      "sha256": "86f0435d08fdb65d1aa41d1472684f57e6e71930626497bdf4d7a9ec1a632217",
+      "n_rows": 300,
+      "bytes": 65007
+    },
+    "claims_test.jsonl": {
+      "sha256": "558930d75215c73f84a28fe538307d6d397c9de1ec7239514cf45f80d75d2ca3",
+      "n_rows": 300,
+      "bytes": 33769
+    }
+  }
+}
