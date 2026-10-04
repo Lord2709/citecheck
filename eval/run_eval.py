@@ -222,13 +222,24 @@ def _git_commit():
         return None
 
 
+# module name -> distribution name.  Read versions from package metadata, not `module.__version__`:
+# rank_bm25 has no __version__, which recorded `null` in every Session 5 results.json (RESULTS_session05.md, check g).
+_DISTS = {"torch": "torch", "transformers": "transformers", "sentence_transformers": "sentence-transformers",
+          "rank_bm25": "rank-bm25", "numpy": "numpy"}
+
+
 def _versions():
+    from importlib import metadata
+
     v = {"python": platform.python_version(), "platform": platform.platform()}
-    for mod in ("torch", "transformers", "sentence_transformers", "rank_bm25", "numpy"):
+    for mod, dist in _DISTS.items():
         try:
-            v[mod] = __import__(mod).__version__
-        except Exception:
-            v[mod] = None
+            v[mod] = metadata.version(dist)
+        except metadata.PackageNotFoundError:
+            try:
+                v[mod] = getattr(__import__(mod), "__version__", None)
+            except Exception:
+                v[mod] = None
     return v
 
 

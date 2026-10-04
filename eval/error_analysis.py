@@ -39,6 +39,18 @@ def bucket(rec: dict):
     return "MISSED_BY_VERIFIER" if judged & set(rec.get("gold_docs", [])) else "RETRIEVAL_MISS"
 
 
+def _driver_label(rec: dict, driver, corpus: dict) -> str:
+    """Which paper the shown sentences come from.  Before this, errors.md printed the rank-1 title next to sentences
+    from the DRIVER paper, which may be a different one (RESULTS_session05.md, "Other small issues")."""
+    if driver is None:
+        return "(none)"
+    title = corpus[driver["doc_id"]].title if driver["doc_id"] in corpus else driver["doc_id"]
+    tag = "a gold evidence paper" if driver["doc_id"] in set(rec.get("gold_docs", [])) else "NOT a gold paper"
+    if rec.get("driver_doc") is None:
+        return f"none (abstained); showing rank-{driver.get('rank', 1)} paper: {title}"
+    return f"rank {driver.get('rank', '?')}: {title} ({tag})"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, help="eval/results/<name>")
@@ -89,8 +101,9 @@ def main(argv=None):
                 f"**#{r['id']}** gold `{r['gold']}` -> pred `{r['pred']}` (conf {r['confidence']:.2f})  ",
                 f"claim: {c.claim}  ",
                 f"gold paper(s): {'; '.join(gold_titles) or '(none, NEI)'}  ",
-                f"top retrieved: {corpus[top['doc_id']].title if top else '(none)'}  ",
-                f"sentences the verifier saw: {' | '.join(used) or '-'}  ",
+                f"top retrieved (rank 1): {corpus[top['doc_id']].title if top else '(none)'}  ",
+                f"paper that drove the verdict: {_driver_label(r, driver, corpus)}  ",
+                f"sentences the verifier saw (from that paper): {' | '.join(used) or '-'}  ",
                 f"gold rationale: {' | '.join(gold_sent) or '-'}  ",
                 "your category: _______",
                 "",
