@@ -23,6 +23,8 @@ week" would be noise. It stays a first-class number in the report, and the midte
 
 | item | target | set on | by |
 |---|---|---|---|
-| zero-shot beats majority and word-overlap (paired-bootstrap 95% CI of the difference above 0) | yes/no | <<TBD>> | Vyom + Sahil |
-| false-SUPPORT rate ceiling | <<TBD, decide after seeing the zero-shot number>> | <<TBD>> | Vyom + Sahil |
-| user tests: completed and correct | <<TBD, e.g. at least 2 of 3 participants on T1>> | <<TBD>> | Vyom + Ritika |
+| zero-shot beats majority and word-overlap (paired-bootstrap 95% CI of the difference above 0) | yes | 2026-10-04 (after Session 5 results) | Vyom + Sahil |
+| false-SUPPORT rate ceiling | 0.15 | 2026-10-04 (after Session 5 results) | Vyom + Sahil |
+| user tests: completed and correct | >= 3 participants; >= 2 get every T1 task right without help; 0 misled | 2026-10-04 (before any user test) | Vyom + Ritika |
+
+The machine-readable copy is `docs/decision_rules.json`; `python -m tools.midterm_decision` applies it.

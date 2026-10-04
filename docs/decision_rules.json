@@ -1,0 +1,21 @@
+{
+  "_read_me": "Pivot-or-persevere thresholds for the Oct 6 presentation, applied by `python -m tools.midterm_decision`. Change a number ONLY in a reviewed PR, and never after seeing the result it decides.",
+  "set_on": "2026-10-04",
+  "set_by": ["Vyom (Product)", "Sahil (Data & Eval)", "Ritika (Users & Research)"],
+  "honesty_note": "The model and safety thresholds were written down AFTER the Session 5 results were seen (we missed the pre-registration step in docs/north_star.md). The user thresholds were written BEFORE any user test was run. Say this on the decision slide.",
+  "model": {
+    "rule": "the deployed run beats every baseline: paired-bootstrap 95% CI of the macro-F1 difference entirely above 0",
+    "baselines": ["majority", "lexical"]
+  },
+  "safety": {
+    "rule": "false-SUPPORT rate of the deployed run on SciFact dev is at or below the ceiling",
+    "false_support_max": 0.15,
+    "why_this_number": "about 1 in 7 non-supporting claims called SUPPORTS; the word-overlap baseline is at 0.222"
+  },
+  "users": {
+    "rule": "at least min_participants outside users; at least min_t1_success_participants got every T1 task right without help; no participant agreed with a wrong verdict more than max_misled times in total",
+    "min_participants": 3,
+    "min_t1_success_participants": 2,
+    "max_misled": 0
+  }
+}
