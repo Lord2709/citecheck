@@ -6,6 +6,7 @@ Owner: Users & Research (Ritika).
 Reads   task_tests.csv                 (one row per participant x task; see evidence/templates/)
         usage_logs/*.jsonl  [optional] (anonymized app logs; used to cross-check times and to flag demo/unvalidated backends)
 Writes  summary.md                     (paste the headline numbers into reports/sessionNN.md)
+        summary.json                   (the same numbers, machine-readable: tools/midterm_decision.py reads it)
 """
 from __future__ import annotations
 
@@ -17,6 +18,9 @@ from collections import defaultdict
 from pathlib import Path
 
 DONE = "completed"
+# verdict_shown is written as the app displays it; gold_label in SciFact's vocabulary
+TO_INTERNAL = {"SUPPORTS": "SUPPORT", "CONTRADICTS": "CONTRADICT", "NOT ENOUGH EVIDENCE": "NEI",
+               "SUPPORT": "SUPPORT", "CONTRADICT": "CONTRADICT", "NEI": "NEI"}
 
 
 def load_tests(path: Path) -> list:
@@ -32,6 +36,22 @@ def success(r: dict) -> bool:
     if (r.get("outcome") or "").strip() != DONE:
         return False
     return (r.get("participant_correct") or "").strip().lower() != "n"
+
+
+def misled(r: dict) -> bool:
+    """The tool showed a WRONG verdict and the participant agreed with it: the harm our guardrail exists to prevent."""
+    shown = TO_INTERNAL.get((r.get("verdict_shown") or "").strip().upper())
+    gold = TO_INTERNAL.get((r.get("gold_label") or "").strip().upper())
+    return bool(shown and gold and shown != gold and (r.get("participant_agrees") or "").strip().lower() == "y")
+
+
+def t1_by_participant(rows: list) -> dict:
+    """participant -> True if every T1 attempt (T1, T1-1, T1-2...) was a success.  Only participants who did T1."""
+    out = {}
+    for r in rows:
+        if (r.get("task_id") or "").strip().upper().startswith("T1"):
+            out[r["participant"]] = out.get(r["participant"], True) and success(r)
+    return out
 
 
 def log_flags(log_dir: Path) -> dict:
@@ -73,6 +93,10 @@ def summarize(rows: list, flags: dict) -> dict:
                          "median_s": st.median([r["seconds"] for r in v if r["seconds"] is not None] or [float("nan")])}
                      for t, v in sorted(per_task.items())},
         "flags": flags,
+        "t1_participants": len(t1_by_participant(rows)),
+        "t1_success_participants": sum(t1_by_participant(rows).values()),
+        "misled": sum(misled(r) for r in rows),
+        "misled_rows": [f"{r['participant']}:{r['task_id']}" for r in rows if misled(r)],
     }
 
 
@@ -84,7 +108,10 @@ def render(s: dict) -> str:
              f"- **task success rate: {pct(s['success_rate'])}** (completed without help and, where a gold answer exists, correct)",
              f"- median time to finish a completed task: {med}",
              f"- participants who agreed with the tool's verdict: {pct(s['agree_rate'])}",
-             f"- participant's final answer matched the gold label: {pct(s['correct_rate'])}", "",
+             f"- participant's final answer matched the gold label: {pct(s['correct_rate'])}",
+             f"- participants who got every T1 task right without help: **{s['t1_success_participants']} of {s['t1_participants']}**",
+             f"- times a participant agreed with a WRONG verdict (misled): **{s['misled']}**"
+             + (f" ({', '.join(s['misled_rows'])})" if s["misled_rows"] else ""), "",
              "| task | attempts | success | median s |", "|---|---|---|---|"]
     for t, v in s["per_task"].items():
         lines.append(f"| {t} | {v['n']} | {pct(v['success'])} | {v['median_s']:.0f} |")
@@ -93,7 +120,7 @@ def render(s: dict) -> str:
                   f"feedback agree/disagree {f['agree']}/{f['disagree']}."]
     warns = []
     if s["n_participants"] < 3:
-        warns.append(f"only {s['n_participants']} participant(s): the Session 5 plan targeted 3 outside users")
+        warns.append(f"only {s['n_participants']} participant(s): the plan targets at least 3 outside users")
     if f["demo_or_unvalidated"]:
         warns.append(f"{f['demo_or_unvalidated']} verify event(s) ran on a DEMO or UNVALIDATED backend: those sessions do not evaluate our real model")
     if s["n_attempts"] and not f["logs"]:
@@ -111,6 +138,7 @@ def main(argv=None):
     rows = load_tests(d / "task_tests.csv")
     s = summarize(rows, log_flags(d / "usage_logs"))
     (d / "summary.md").write_text(render(s), encoding="utf-8")
+    (d / "summary.json").write_text(json.dumps(s, indent=2) + "\n", encoding="utf-8")
     print(render(s))
     return s
 

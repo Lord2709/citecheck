@@ -2,9 +2,9 @@
 
 **Before** (10 min, once per day)
 - [ ] `git pull`; app runs: `streamlit run app/streamlit_app.py` (the sidebar must say **Validated configuration**. If it says DEMO or UNVALIDATED, stop: fix it or tell Sakshaat; those sessions do not count as testing our model).
-- [ ] `python -m tools.pick_task_stimuli --seed <N> --split dev --out evidence/session05` (write the seed in `evidence/session05/README.md`)
+- [ ] `python -m tools.pick_task_stimuli --seed <N> --split dev --out evidence/session06` (write the seed in `evidence/session06/README.md`)
 - [ ] Set `CITECHECK_LOG=logs/usage.jsonl`. Open the app with `?p=P01` in the URL (participant code) or type it into the sidebar *Researcher panel*.
-- [ ] Copy `templates/roster_TEMPLATE.csv` -> `session05/roster.csv`, `templates/task_tests_TEMPLATE.csv` -> `session05/task_tests.csv`, notes template -> `session05/notes/P01.md`.
+- [ ] Copy `templates/roster_TEMPLATE.csv` -> `session06/roster.csv`, `templates/task_tests_TEMPLATE.csv` -> `session06/task_tests.csv`, notes template -> `session06/notes/P01.md`.
 
 **During** (participant drives; you observe and write notes AS IT HAPPENS)
 1. Read the consent script. Ask about logging typed text; tick the box in the Researcher panel only if they say yes.
@@ -16,7 +16,8 @@
 
 **After** (10 min, the SAME day)
 - [ ] Fill `task_tests.csv`, one row per participant x task (seconds from the panel/log; outcome = `completed | gave_up | needed_help`).
-- [ ] Anonymize the log into `evidence/session05/usage_logs/` (see `evidence/README.md`).
-- [ ] `python -m tools.summarize_tasktests evidence/session05`, then read `summary.md`: fix any warning you can.
+- [ ] Anonymize the log into `evidence/session06/usage_logs/` (see `evidence/README.md`).
+- [ ] `python -m tools.summarize_tasktests evidence/session06`, then read `summary.md`: fix any warning you can.
+- [ ] `python -m tools.check_evidence evidence/session06` must end with `OK` (no FAIL) before you commit. Paste its output into the PR body.
 - [ ] Commit on a branch, open a PR, ask a teammate to review it. Put the PR number in the weekly report.
 - [ ] Write down **one change we should make because of this session** and open an issue for it: the report needs "what we changed as a result".
