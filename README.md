@@ -42,6 +42,17 @@ streamlit run app/streamlit_app.py                    # the sidebar must say "Va
 No internet, or no model download? `CITECHECK_VERIFIER=lexical streamlit run app/streamlit_app.py` runs a clearly-labelled DEMO backend.
 Command line: `python -m src.main verify --claim "..." --abstract "..."` (see `python -m src.main --help`).
 
+## Live demo (Oct 6)
+
+```bash
+python -m eval.pick_demo_examples --include-failure   # once (Data & Eval): seeded SciFact dev examples -> demo/
+python -m tools.demo_check --online                   # first run on the presenting laptop (caches the model)
+python -m tools.demo_check                            # Wi-Fi-off rehearsal: must end "overall: PASS"
+streamlit run app/streamlit_app.py                    # Check a citation -> "Demo examples" -> Load -> Check citation
+```
+
+The presenter card with what should appear is `demo/DEMO_SCRIPT.md`; the check result is `demo/DEMO_CHECK.md`.
+
 ## Team
 
 | Hat | Owner | Accountable for |

@@ -156,3 +156,46 @@ def test_paper_from_text():
     assert paper_from_text("", "x").title == "Pasted abstract"
     with pytest.raises(IngestError):
         paper_from_text("t", "   ")
+
+
+CITATION_STRING = ("David Wadden, Shanchuan Lin, Kyle Lo, Lucy Lu Wang, Madeleine van Zuylen, Arman Cohan, Hannaneh "
+                   "Hajishirzi. Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing "
+                   "(EMNLP). 2020.")
+
+
+def _inv(text):
+    inv = {}
+    for i, w in enumerate(text.split()):
+        inv.setdefault(w, []).append(i)
+    return inv
+
+
+@pytest.mark.parametrize("text,expected", [
+    (CITATION_STRING, True),
+    ("Smith J, Lee K. Journal of Invented Results, vol. 3, pp. 1-9, 2019.", True),
+    ("Zorvex helps bones.", False),
+    ("We report a 2019 trial presented at a conference. Zorvex increased bone density in mice.", False),  # 2 cues: kept
+    ("", False),
+])
+def test_looks_like_citation(text, expected):
+    from src.ingest import looks_like_citation
+
+    assert looks_like_citation(text) is expected
+
+
+def test_citation_string_from_openalex_falls_back_to_s2(tmp_path):
+    """Live failure from 2026-09-29: OpenAlex gave the citation string as the abstract."""
+    meta = dict(OPENALEX, abstract_inverted_index=_inv(CITATION_STRING))
+    s2 = {"paperId": "abc", "title": "Fact or Fiction", "abstract": "We introduce scientific claim verification. A new task.",
+          "year": 2020, "venue": "EMNLP", "externalIds": {"DOI": "10.18653/v1/2020.emnlp-main.609"}}
+    f = fetcher([("openalex.org", Resp(200, meta)), ("semanticscholar.org", Resp(200, s2))], tmp_path)
+    p = f.fetch_paper("10.18653/v1/2020.emnlp-main.609")
+    assert p.source == "s2" and p.abstract.startswith("We introduce")
+
+
+def test_citation_string_everywhere_is_refused_and_not_cached(tmp_path):
+    meta = dict(OPENALEX, abstract_inverted_index=_inv(CITATION_STRING))
+    f = fetcher([("openalex.org", Resp(200, meta)), ("semanticscholar.org", Resp(404))], tmp_path)
+    with pytest.raises(IngestError, match="citation details"):
+        f.fetch_paper("10.18653/v1/2020.emnlp-main.609")
+    assert not list(tmp_path.glob("cache/*.json"))                       # a refused paper is not cached
