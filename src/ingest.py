@@ -85,6 +85,32 @@ def clean_context(text: str) -> str:
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
+_CITATION_HINTS = re.compile(
+    r"\b(?:proceedings|conference|symposium|workshop|association for computational linguistics|journal of|vol\.|"
+    r"volume \d|pp\.|pages \d|et al\.?|in:|isbn|issn|press|publisher)(?!\w)", re.I)
+_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def looks_like_citation(text: str) -> bool:
+    """True when 'abstract' text is really a citation string (authors, venue, year), not an abstract.
+
+    Seen live on 2026-09-29: for 10.18653/v1/2020.emnlp-main.609 OpenAlex returned the citation as the abstract, and the
+    verifier then judged the claim against author names and a venue (reports/session05.md, "What did not work").
+    Deliberately conservative: only SHORT texts (< 80 words) with at least three venue/year cues are rejected, so a
+    real abstract that mentions a year and a conference is kept.
+    """
+    text = (text or "").strip()
+    if not text:
+        return False
+    n_words = len(text.split())
+    cues = len(_CITATION_HINTS.findall(text)) + len(_YEAR.findall(text))
+    return n_words < 80 and cues >= 3
+
+
+def usable_abstract(text: str) -> bool:
+    return bool((text or "").strip()) and not looks_like_citation(text)
+
+
 def paper_from_text(title: str, abstract: str) -> Paper:
     """A pasted abstract: always works offline."""
     if not (abstract or "").strip():
@@ -201,13 +227,14 @@ class Fetcher:
         paper = None
         if pid.kind == "doi":
             paper = self._openalex(pid.value)
-            if paper is None or not paper.abstract:
+            if paper is None or not usable_abstract(paper.abstract):
                 alt = self._s2_paper(f"DOI:{pid.value}")
-                paper = alt if alt and alt.abstract else (paper or alt)
+                paper = alt if alt and usable_abstract(alt.abstract) else (paper or alt)
         elif pid.kind == "arxiv":
             paper = self._arxiv(pid.value)
-            if paper is None or not paper.abstract:
-                paper = self._s2_paper(f"ARXIV:{pid.value}") or paper
+            if paper is None or not usable_abstract(paper.abstract):
+                alt = self._s2_paper(f"ARXIV:{pid.value}")
+                paper = alt if alt and usable_abstract(alt.abstract) else (paper or alt)
         else:
             paper = self._s2_paper(pid.value)
 
@@ -216,6 +243,9 @@ class Fetcher:
         if not paper.abstract:
             raise IngestError(f"Found “{paper.title or pid.value}” but no abstract is available from open sources. "
                               "Paste the abstract instead.")
+        if looks_like_citation(paper.abstract):  # never judge a claim against author names and a venue
+            raise IngestError(f"Found “{paper.title or pid.value}”, but the open sources returned citation details "
+                              "(authors, venue, year) instead of an abstract. Paste the abstract instead.")
         if cf is not None:
             cf.parent.mkdir(parents=True, exist_ok=True)
             cf.write_text(json.dumps(asdict(paper)), encoding="utf-8")

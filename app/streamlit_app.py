@@ -6,9 +6,11 @@ Environment (all optional):
   CITECHECK_VERIFIER / _RETRIEVER / _TAU / _K / _DATA_DIR   override the evaluated configuration (=> UNVALIDATED banner)
   CITECHECK_LOG=logs/usage.jsonl                            where usage events go
   CITECHECK_LOG_ENABLED=0                                   turn logging off
+  CITECHECK_DEMO_EXAMPLES=demo/demo_examples.json           live-demo examples (written by `python -m eval.pick_demo_examples`)
   CITECHECK_MAILTO=you@umd.edu                              polite-pool e-mail for OpenAlex requests
   S2_API_KEY=...                                            optional Semantic Scholar key (fewer rate limits)
 """
+import json
 import os
 import sys
 import time
@@ -21,7 +23,7 @@ import streamlit as st  # noqa: E402
 from src.ingest import Fetcher, IngestError, paper_from_text  # noqa: E402
 from src.pipeline import build_pipeline  # noqa: E402
 from src.relevance import RelevanceScorer  # noqa: E402
-from src.schema import CONTRADICT, NEI, SUPPORT  # noqa: E402
+from src.schema import CONTRADICT, DISPLAY, NEI, SUPPORT  # noqa: E402
 from src.text_utils import truncate  # noqa: E402
 from src.usage_log import UsageLogger  # noqa: E402
 
@@ -34,6 +36,17 @@ EXAMPLE = {
                  "twelve weeks. Zorvex supplementation significantly increased femoral bone density compared with controls. "
                  "The effect was dose dependent and was not observed in mice fed a standard diet."),
 }
+
+
+def load_demo_examples(path=None) -> list:
+    """Seeded, pre-checked SciFact dev examples for the live demo (main + backups + the honest failure, if picked)."""
+    path = Path(path or os.environ.get("CITECHECK_DEMO_EXAMPLES", "demo/demo_examples.json"))
+    try:
+        j = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    items = list(j.get("examples") or []) + ([j["failure"]] if j.get("failure") else [])
+    return [e for e in items if e.get("claim") and e.get("abstract")]
 
 
 @st.cache_resource(show_spinner="Loading models (first start can take a minute)…")
@@ -153,12 +166,28 @@ def resolve_paper(mode, ident, title, abstract):
 # ----------------------------------------------------------------------------------------------
 # Tab 1: check a citation
 # ----------------------------------------------------------------------------------------------
+def fill_example(claim, title, abstract, gold=None):
+    """Widget values must be set BEFORE the widgets are drawn, so this runs above them."""
+    st.session_state.claim = claim
+    st.session_state.chk_src = "Paste an abstract"
+    st.session_state.chk_title = title
+    st.session_state.chk_abstract = abstract
+    st.session_state.demo_gold = (claim, gold) if gold else None
+    st.session_state.pop("verdict", None)
+
+
 with tab_check:
+    demo = load_demo_examples()
+    if demo:
+        with st.expander("Demo examples (SciFact dev, picked by seed; for presenters, not for participants)"):
+            names = [f"{e.get('slot', '?')} · SciFact claim #{e.get('claim_id', '?')} · {e.get('role', '')}" for e in demo]
+            pick = st.selectbox("Example", range(len(demo)), format_func=lambda i: names[i], key="demo_pick")
+            if st.button("Load this example", key="btn_demo"):
+                e = demo[pick]
+                fill_example(e["claim"], e.get("title", ""), e["abstract"], e.get("gold"))
+                log.log("demo_example", slot=e.get("slot"), claim_id=e.get("claim_id"))
     if st.button("Fill in an invented example", key="btn_example"):
-        st.session_state.claim = EXAMPLE["claim"]
-        st.session_state.chk_src = "Paste an abstract"
-        st.session_state.chk_title = EXAMPLE["title"]
-        st.session_state.chk_abstract = EXAMPLE["abstract"]
+        fill_example(EXAMPLE["claim"], EXAMPLE["title"], EXAMPLE["abstract"])
     claim = st.text_area("Claim: the sentence you want the paper to support", key="claim", height=90,
                          placeholder="e.g. Antiretroviral therapy reduces the incidence of tuberculosis.")
     mode, ident, title, abstract = source_inputs("chk", pipe.has_corpus)
@@ -187,6 +216,11 @@ with tab_check:
     v = st.session_state.get("verdict")
     if v is not None:
         render_verdict(v)
+        claim_gold = st.session_state.get("demo_gold")
+        if claim_gold and claim_gold[0].strip() == v.claim:          # only if the example's claim was not edited
+            gold = claim_gold[1]
+            mark = "matches" if gold == v.label else "does NOT match"
+            st.info(f"SciFact annotators' label for this claim and paper: **{DISPLAY.get(gold, gold)}**; the model {mark} it.")
         st.markdown("**Do you agree with this verdict?**")
         c1, c2, _ = st.columns([1, 1, 4])
         for col, key, label, val in ((c1, "fb_yes", "👍 Agree", "agree"), (c2, "fb_no", "👎 Disagree", "disagree")):
