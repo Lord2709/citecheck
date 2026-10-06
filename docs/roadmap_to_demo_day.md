@@ -12,7 +12,7 @@ that week, measure one number vs last week, write the report by 5:00pm Tuesday.*
 | **9** Nov 3 | a small labelled set of REAL citations from participants' own papers (n about 50) | those participants label our verdicts | accuracy on real citations vs SciFact | the domain/atomic-claim gap |
 | **10** Nov 10 | out-of-domain or SciFact-Open check; cost/latency numbers | more task tests | generalisation gap | "works only on SciFact" |
 | **11** Nov 17 | feature freeze; final model chosen and promoted; demo-day slot assigned | dress rehearsal with a user | final dev number | last-minute change |
-| **12** Nov 24 | final report and slides drafted; README a stranger can follow; recorded backup demo | stranger follows the README | (none: polish) | packaging |
+| **12** Nov 24 | final report and demo-day presentation drafted; README a stranger can follow; recorded backup demo | stranger follows the README | (none: polish) | packaging |
 | **13** Dec 1 5pm | `reports/final/` committed to `main` | | | deadline |
 
 Rules for the roadmap: never plan a week with no user contact; if a week ships nothing, the report says so and why (that is credited).

@@ -38,4 +38,4 @@ batch upload of a whole manuscript; browser extension; summaries of papers; any 
 - [ ] Live demo path works with **no internet** (paste-an-abstract) and a recorded backup exists
 - [ ] Baseline ladder committed in `eval/results/` (majority, word-overlap, zero-shot NLI) with CIs
 - [ ] >= 3 outside participants' task tests committed (`evidence/session05/` and any later session)
-- [ ] Pivot/persevere decision written with the rules in `docs/midterm_oct6.md` applied honestly
+- [ ] Pivot/persevere decision computed from the rules in `docs/decision_rules.json` (`python -m tools.midterm_decision`)

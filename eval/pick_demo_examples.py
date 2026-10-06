@@ -4,7 +4,7 @@ Owner: Data & Evaluation (Sahil).
     python -m eval.pick_demo_examples                      # dev split, seed 0, 2 examples per verdict (main + backup)
     python -m eval.pick_demo_examples --seed 1 --per-label 2 --include-failure
 
-Why this exists (docs/midterm_oct6.md, pre-demo checklist): the three demo beats (a SUPPORTS, a CONTRADICTS, a NOT
+Why this exists (pre-demo checklist): the three demo beats (a SUPPORTS, a CONTRADICTS, a NOT
 ENOUGH EVIDENCE) must come "from data we did not tune on, and they behave".  Hand-picking claims until one works is
 cherry-picking, and we would not know how often it fails.  This script makes the choice auditable:
 

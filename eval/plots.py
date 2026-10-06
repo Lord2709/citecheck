@@ -1,10 +1,10 @@
-"""Figures for the report and the Oct 6 slides.   Owner: Data & Evaluation (Sahil).
+"""Figures for the reports and the Oct 6 presentation.   Owner: Data & Evaluation (Sahil).
 
     python -m eval.plots                       # all REAL runs in eval/results -> eval/results/figures/*.png
     python -m eval.plots --run zero_shot_nli   # also confusion matrix + tau curve for that run
 
 Synthetic-fixture runs are skipped unless --include-synthetic (they are plumbing checks, not results).
-Every chart states n and the split in its title so a slide cannot be mistaken for something it is not.
+Every chart states n and the split in its title so a figure cannot be mistaken for something it is not.
 """
 from __future__ import annotations
 

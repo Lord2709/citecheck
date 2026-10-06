@@ -12,7 +12,7 @@ python -m eval.run_eval --name lexical       --retriever bm25 --verifier lexical
 python -m eval.run_eval --name zero_shot_nli --retriever bm25 --verifier nli --oracle \
                         --compare-with eval/results/majority --compare-with eval/results/lexical --promote
 
-# 2. what went wrong, and pretty pictures for the slides
+# 2. what went wrong, and the figures
 python -m eval.error_analysis --run eval/results/zero_shot_nli
 python -m eval.plots --run zero_shot_nli
 
