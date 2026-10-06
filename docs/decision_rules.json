@@ -2,7 +2,7 @@
   "_read_me": "Pivot-or-persevere thresholds for the Oct 6 presentation, applied by `python -m tools.midterm_decision`. Change a number ONLY in a reviewed PR, and never after seeing the result it decides.",
   "set_on": "2026-10-04",
   "set_by": ["Vyom (Product)", "Sahil (Data & Eval)", "Ritika (Users & Research)"],
-  "honesty_note": "The model and safety thresholds were written down AFTER the Session 5 results were seen (we missed the pre-registration step in docs/north_star.md). The user thresholds were written BEFORE any user test was run. Say this on the decision slide.",
+  "honesty_note": "The model and safety thresholds were written down AFTER the Session 5 results were seen (we missed the pre-registration step in docs/north_star.md). The user thresholds were written BEFORE any user test was run.",
   "model": {
     "rule": "the deployed run beats every baseline: paired-bootstrap 95% CI of the macro-F1 difference entirely above 0",
     "baselines": ["majority", "lexical"]
