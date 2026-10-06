@@ -24,8 +24,13 @@ TO_INTERNAL = {"SUPPORTS": "SUPPORT", "CONTRADICTS": "CONTRADICT", "NOT ENOUGH E
 
 
 def load_tests(path: Path) -> list:
-    with open(path, newline="", encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if (r.get("participant") or "").strip()]
+    # utf-8-sig: Excel's "CSV UTF-8" adds a byte-order mark that silently hid every row (0 participants; Oct 4 full test)
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        if "participant" not in (reader.fieldnames or []):
+            raise ValueError(f"{Path(path).name}: no 'participant' column in the header {reader.fieldnames}; "
+                             "copy the header from evidence/templates/task_tests_TEMPLATE.csv")
+        rows = [r for r in reader if (r.get("participant") or "").strip()]
     for r in rows:
         r["seconds"] = float(r["seconds"]) if (r.get("seconds") or "").strip() else None
     return rows
@@ -135,7 +140,10 @@ def main(argv=None):
     ap.add_argument("folder", help="e.g. evidence/session05")
     a = ap.parse_args(argv)
     d = Path(a.folder)
-    rows = load_tests(d / "task_tests.csv")
+    try:
+        rows = load_tests(d / "task_tests.csv")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise SystemExit(f"ERROR: {e}")
     s = summarize(rows, log_flags(d / "usage_logs"))
     (d / "summary.md").write_text(render(s), encoding="utf-8")
     (d / "summary.json").write_text(json.dumps(s, indent=2) + "\n", encoding="utf-8")

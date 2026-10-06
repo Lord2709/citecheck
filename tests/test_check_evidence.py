@@ -105,3 +105,41 @@ def test_summary_counts_misled_and_t1(tmp_path):
     assert (s["t1_participants"], s["t1_success_participants"]) == (2, 1)
     j = json.loads((d / "summary.json").read_text(encoding="utf-8"))
     assert j["misled"] == 1 and j["n_participants"] == 3
+
+
+def test_excel_bom_csvs_are_read(tmp_path):
+    """Excel 'CSV UTF-8' writes a byte-order mark; it used to give 0 participants and a KeyError (Oct 4 full test)."""
+    d = tmp_path / "s"
+    d.mkdir()
+    for name, fields, rows in (("roster.csv", ROSTER, [{"participant": "P01", "consent_participation": "yes"}]),
+                               ("task_tests.csv", FIELDS, [{"participant": "P01", "task_id": "T1-1", "outcome": "completed",
+                                                            "seconds": "60", "evidence_files": "notes/P01.md"}])):
+        with open(d / name, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.DictWriter(f, fieldnames=fields)
+            w.writeheader()
+            for r in rows:
+                w.writerow({k: r.get(k, "") for k in fields})
+    (d / "notes").mkdir()
+    (d / "notes" / "P01.md").write_text("# notes\n", encoding="utf-8")
+    (d / "README.md").write_text("# index\n", encoding="utf-8")
+    s = summarize_tasktests.main([str(d)])
+    assert s["n_participants"] == 1 and s["n_attempts"] == 1
+    rows = ce.check(d)
+    assert status(rows, "participant codes") == ce.PASS and status(rows, "task_tests.csv rows") == ce.PASS
+
+
+def test_wrong_header_is_a_clear_failure_not_a_crash(tmp_path):
+    d = tmp_path / "s"
+    d.mkdir()
+    (d / "roster.csv").write_text("name,consent\nP01,yes\n", encoding="utf-8")
+    (d / "task_tests.csv").write_text("who,task\nP01,T1\n", encoding="utf-8")
+    assert status(ce.check(d), "CSV format") == ce.FAIL
+    with pytest.raises(SystemExit, match="participant"):
+        summarize_tasktests.main([str(d)])
+
+
+def test_decimals_are_not_phone_numbers_but_phones_are():
+    fractions = [n / q for q in range(2, 101) for n in range(1, q)]
+    assert ce.personal_data(json.dumps({"rates": fractions})) == []          # 12/19 = 0.631578947368421 used to be flagged
+    for phone in ("301 555 0100", "301.555.0100", "+1 (301) 555-0100", "Reach me at 3015550100."):
+        assert ce.personal_data(phone), phone
