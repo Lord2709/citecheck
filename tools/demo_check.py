@@ -3,7 +3,7 @@
     python -m tools.demo_check              # Wi-Fi-off rehearsal: the model must load from the local cache
     python -m tools.demo_check --online     # allow model downloads (first run on a new laptop)
 
-Automates the "Pre-demo checklist" in docs/midterm_oct6.md:
+Automates the pre-demo checklist:
 
   1. no CITECHECK_* override is set (otherwise the sidebar says UNVALIDATED and the demo is not the evaluated model)
   2. the pipeline builds with NO fallback, offline by default (HF_HUB_OFFLINE=1): the "Wi-Fi off" check
