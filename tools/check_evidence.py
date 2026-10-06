@@ -39,8 +39,17 @@ TEXT_SUFFIXES = {".md", ".csv", ".jsonl", ".json", ".txt"}
 
 
 def _read_csv(path: Path) -> list:
-    with open(path, newline="", encoding="utf-8") as f:
-        return [r for r in csv.DictReader(f) if any((v or "").strip() for v in r.values())]
+    """utf-8-sig: Excel's "CSV UTF-8" starts the file with a byte-order mark, which otherwise renames the first column
+    to '\ufeffparticipant' and every row looks empty (bug found in the Oct 4 full test)."""
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            if "participant" not in (reader.fieldnames or []):
+                raise ValueError(f"{Path(path).name}: no 'participant' column in the header {reader.fieldnames}; "
+                                 "copy the header from evidence/templates/")
+            return [r for r in reader if any((v or "").strip() for v in r.values())]
+    except UnicodeDecodeError:
+        raise ValueError(f"{Path(path).name} is not UTF-8: in Excel use 'Save as' -> 'CSV UTF-8 (Comma delimited)'")
 
 
 def _yes(v) -> bool:
@@ -50,10 +59,17 @@ def _yes(v) -> bool:
 _DECIMAL = re.compile(r"\d*\.\d+")
 
 
+def _fraction_digits(text: str, start: int) -> bool:
+    """True when the match starts right after '<digit>.', i.e. it is the fractional part of a number like 0.6315789473
+    (12/19 in summary.json was flagged as a phone number: Oct 4 full test)."""
+    return start >= 2 and text[start - 1] == "." and text[start - 2].isdigit()
+
+
 def personal_data(text: str) -> list:
     """E-mail addresses and phone numbers (a long decimal like 0.6666666666 is a number, not a phone)."""
     found = _EMAIL.findall(text)
-    found += [m.group(0) for m in _PHONE.finditer(text) if not _DECIMAL.fullmatch(m.group(0).strip())]
+    found += [m.group(0) for m in _PHONE.finditer(text)
+              if not _DECIMAL.fullmatch(m.group(0).strip()) and not _fraction_digits(text, m.start())]
     return found
 
 
@@ -71,8 +87,12 @@ def check(folder) -> list:
     if not (d / "roster.csv").exists() or not (d / "task_tests.csv").exists():
         return rows
 
-    roster = {r["participant"].strip(): r for r in _read_csv(d / "roster.csv")}
-    tests = [r for r in _read_csv(d / "task_tests.csv") if (r.get("participant") or "").strip()]
+    try:
+        roster = {r["participant"].strip(): r for r in _read_csv(d / "roster.csv")}
+        tests = [r for r in _read_csv(d / "task_tests.csv") if (r.get("participant") or "").strip()]
+    except ValueError as e:
+        add("CSV format", FAIL, str(e))
+        return rows
 
     # ---- roster ---------------------------------------------------------------------------------------------
     bad_codes = [c for c in roster if not CODE.match(c)]
