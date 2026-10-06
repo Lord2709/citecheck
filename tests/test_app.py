@@ -52,8 +52,38 @@ def test_example_check_and_feedback_logged_without_text(app):
 def test_errors_are_friendly(app):
     at, log = app
     at.button(key="btn_check").click().run()                                        # empty claim
-    assert not at.exception and any("Enter a claim" in e.value for e in at.error)
+    assert not at.exception and any("Enter a claim" in e.value for e in at.warning)  # a hint, not a red error
+    assert not any("Enter a claim" in e.value for e in at.error)                       # (the sidebar's DEMO banner is the only error)
     assert any(e["event"] == "error" for e in events(log))
+
+
+def test_verdict_area_explains_itself_before_a_check(app):
+    at, _ = app
+    assert any("Your verdict will appear here" in i.value for i in at.info)
+
+
+def test_missing_abstract_or_identifier_is_a_hint_not_a_crash(app):
+    at, _ = app
+    at.text_area(key="claim").set_value("Zorvex increases bone density.").run()
+    at.radio(key="chk_src").set_value("Paste an abstract").run()
+    at.button(key="btn_check").click().run()
+    assert not at.exception and any("Paste the paper's abstract" in w.value for w in at.warning)
+    at.radio(key="chk_src").set_value("The paper I'm citing (DOI / arXiv / link)").run()
+    at.button(key="btn_check").click().run()
+    assert not at.exception and any("Enter the DOI" in w.value for w in at.warning)
+    assert any("Your verdict will appear here" in i.value for i in at.info)          # no verdict was produced
+
+
+def test_verdict_card_speaks_plainly_and_start_over_clears(app):
+    at, _ = app
+    at.button(key="btn_example").click().run()
+    at.button(key="btn_check").click().run()
+    card = " ".join(e.value for e in list(at.success) + list(at.error) + list(at.warning))
+    assert "Verdict:" in card and any(h in card for h in ("supports your claim", "contradicts your claim", "Not enough evidence"))
+    assert at.button(key="btn_clear")
+    at.button(key="btn_clear").click().run()
+    assert not at.exception and at.text_area(key="claim").value == "" and at.text_area(key="chk_abstract").value == ""
+    assert any("Your verdict will appear here" in i.value for i in at.info)
 
 
 def test_researcher_panel_times_tasks(app):
