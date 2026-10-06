@@ -78,7 +78,7 @@ pipe, fetcher, log = get_pipeline(), get_fetcher(), logger()
 # ----------------------------------------------------------------------------------------------
 def sidebar():
     m = pipe.meta
-    st.sidebar.header("What is running")
+    st.sidebar.header("Model status")
     if m.get("demo_only"):
         st.sidebar.error("DEMO BACKEND (word overlap). Verdicts are NOT reliable. The neural model did not load.")
     elif m.get("validated"):
@@ -91,6 +91,9 @@ def sidebar():
     else:
         st.sidebar.warning("UNVALIDATED configuration: no evaluated run is deployed, or settings were overridden. "
                            "Do not quote numbers for this setup.")
+    if m.get("validated") and not m.get("demo_only"):
+        st.sidebar.caption("This is the exact model whose accuracy we report (eval/results). The numbers are from SciFact, "
+                           "a biomedical dataset.")
     for w in pipe.warnings:
         st.sidebar.info(w)
     st.sidebar.caption(f"verifier `{m.get('verifier')}` · retriever `{m.get('retriever')}` · tau {m.get('tau')}")
@@ -115,9 +118,12 @@ def sidebar():
 sidebar()
 
 st.title("🔎 CiteCheck")
-st.markdown("**Does the paper you cite really support your claim?** CiteCheck reads a paper's abstract, picks the "
-            "sentences that matter, and tells you whether they support, contradict, or say nothing about your claim. "
-            "Every verdict shows its evidence, so you can check it yourself.")
+st.markdown("**Does the paper you cite really support your claim?** CiteCheck reads the paper's abstract and shows you "
+            "the sentences that decide it, so you can check the verdict yourself.")
+_h1, _h2, _h3 = st.columns(3)
+_h1.markdown("**① Your claim**  \nThe sentence you want to cite the paper for.")
+_h2.markdown("**② The paper**  \nA DOI, arXiv id or link, or paste its abstract.")
+_h3.markdown("**③ The verdict**  \nSupports, contradicts, or not enough evidence, with the sentences that decide it.")
 tab_check, tab_rel, tab_audit, tab_about = st.tabs(
     ["Check a citation", "Is this paper relevant?", "Audit a paper (experimental)", "About & limits"])
 
@@ -125,35 +131,53 @@ tab_check, tab_rel, tab_audit, tab_about = st.tabs(
 # ----------------------------------------------------------------------------------------------
 # helpers
 # ----------------------------------------------------------------------------------------------
+HEADLINE = {
+    SUPPORT: ("✅", "The abstract supports your claim"),
+    CONTRADICT: ("❌", "The abstract contradicts your claim"),
+    NEI: ("❔", "Not enough evidence in the abstract to decide"),
+}
+MEANING = {
+    SUPPORT: "The model judged that the sentences below back up your claim. That is a strong hint, not proof: "
+             "read them before you cite.",
+    CONTRADICT: "The sentences below appear to conflict with your claim. Check whether the paper's population and "
+                "conditions match yours before you drop or change the citation.",
+    NEI: "Nothing in the abstract clearly supports or contradicts the claim. That does NOT mean the claim is false: "
+         "CiteCheck only reads abstracts, and it says so instead of guessing when it is unsure.",
+}
+
+
 def render_verdict(v, key_prefix="v"):
     box = {SUPPORT: st.success, CONTRADICT: st.error, NEI: st.warning}[v.label]
-    icon = {SUPPORT: "✅", CONTRADICT: "❌", NEI: "❔"}[v.label]
-    box(f"{icon} **{v.display_label}**  ·  model confidence {v.confidence:.2f}")
-    if v.label == SUPPORT:
-        st.caption("An NLI model judged that the sentences below entail your claim. That is a strong hint, not proof: read them before you cite.")
-    elif v.label == CONTRADICT:
-        st.caption("The sentences below appear to conflict with your claim. Check whether the paper's population/conditions match yours.")
-    else:
-        st.caption("Nothing in what I read clearly supports or contradicts the claim. That does NOT mean the claim is false: "
-                   "I only read abstracts, and I abstain when unsure." + (f"  ({v.note})" if v.note else ""))
+    icon, headline = HEADLINE[v.label]
+    box(f"#### {icon} {headline}\n**Verdict: {v.display_label}**  ·  model confidence {v.confidence:.2f}")
+    st.progress(min(max(float(v.confidence), 0.0), 1.0),
+                text=f"Model confidence {v.confidence:.0%}: a score from the model, not a guarantee")
+    st.caption(MEANING[v.label] + (f"  ({v.note})" if v.label == NEI and v.note else ""))
+    if v.evidence:
+        st.markdown("**Evidence the model read**")
     for i, e in enumerate(v.evidence, 1):
-        st.markdown(f"**{i}. [{e.title}]({e.url})**" if e.url else f"**{i}. {e.title}**")
-        for s in e.sentences:
-            st.markdown(f"> {s}")
-        st.caption(f"support {e.probs.support:.2f} · neutral {e.probs.neutral:.2f} · contradict {e.probs.contradict:.2f}")
-    with st.expander("Details"):
+        with st.container(border=True):
+            st.markdown(f"**{i}. [{e.title}]({e.url})**" if e.url else f"**{i}. {e.title}**")
+            for s in e.sentences:
+                st.markdown(f"> {s}")
+            st.caption(f"How the model read these sentences: supports {e.probs.support:.0%} · "
+                       f"neutral {e.probs.neutral:.0%} · contradicts {e.probs.contradict:.0%}")
+    with st.expander("Technical details"):
         st.json({"latency_ms": round(v.latency_ms), "backend": v.backend, "abstained": v.abstained})
 
 
 def source_inputs(prefix, allow_corpus):
     options = ["The paper I'm citing (DOI / arXiv / link)", "Paste an abstract"] + (["Search the SciFact corpus"] if allow_corpus else [])
-    choice = st.radio("Where should I look for evidence?", options, horizontal=True, key=f"{prefix}_src")
+    choice = st.radio("Where should I look for evidence?", options, horizontal=True, key=f"{prefix}_src",
+                      help="Give the paper you cite. If it can't be fetched (no internet, no open abstract), paste its abstract.")
     ident = title = abstract = ""
     if choice == options[0]:
-        ident = st.text_input("DOI, arXiv id or link", key=f"{prefix}_ident", placeholder="10.1038/nature14539  or  arXiv:2004.14974")
+        ident = st.text_input("DOI, arXiv id or link", key=f"{prefix}_ident", placeholder="10.1038/nature14539  or  arXiv:2004.14974",
+                              help="We look the paper up in OpenAlex, Semantic Scholar and arXiv and read its abstract.")
     elif choice == options[1]:
         title = st.text_input("Title (optional)", key=f"{prefix}_title")
-        abstract = st.text_area("Abstract", key=f"{prefix}_abstract", height=140)
+        abstract = st.text_area("Abstract", key=f"{prefix}_abstract", height=160,
+                                placeholder="Paste the paper's abstract here. Only the abstract is read.")
     return options.index(choice), ident, title, abstract
 
 
@@ -176,63 +200,98 @@ def fill_example(claim, title, abstract, gold=None):
     st.session_state.pop("verdict", None)
 
 
+def clear_check():
+    """'Start over' (runs as a callback, before the widgets are drawn)."""
+    for k in ("claim", "chk_title", "chk_abstract", "chk_ident", "fb_comment"):
+        st.session_state[k] = ""
+    for k in ("verdict", "demo_gold", "feedback_sent", "check_problem"):
+        st.session_state.pop(k, None)
+
+
+def missing_input(claim, mode, ident, abstract):
+    """A friendly reason the check cannot run yet, or None."""
+    if not claim.strip():
+        return "Enter a claim to check: one sentence, as you would write it in your paper."
+    if mode == 0 and not ident.strip():
+        return "Enter the DOI, arXiv id or link of the paper you cite, or choose “Paste an abstract”."
+    if mode == 1 and not abstract.strip():
+        return "Paste the paper's abstract, or choose “The paper I'm citing” to look it up by DOI / arXiv id."
+    return None
+
+
 with tab_check:
-    demo = load_demo_examples()
-    if demo:
-        with st.expander("Demo examples (SciFact dev, picked by seed; for presenters, not for participants)"):
-            names = [f"{e.get('slot', '?')} · SciFact claim #{e.get('claim_id', '?')} · {e.get('role', '')}" for e in demo]
-            pick = st.selectbox("Example", range(len(demo)), format_func=lambda i: names[i], key="demo_pick")
-            if st.button("Load this example", key="btn_demo"):
-                e = demo[pick]
-                fill_example(e["claim"], e.get("title", ""), e["abstract"], e.get("gold"))
-                log.log("demo_example", slot=e.get("slot"), claim_id=e.get("claim_id"))
-    if st.button("Fill in an invented example", key="btn_example"):
-        fill_example(EXAMPLE["claim"], EXAMPLE["title"], EXAMPLE["abstract"])
-    claim = st.text_area("Claim: the sentence you want the paper to support", key="claim", height=90,
-                         placeholder="e.g. Antiretroviral therapy reduces the incidence of tuberculosis.")
-    mode, ident, title, abstract = source_inputs("chk", pipe.has_corpus)
+    left, right = st.columns([1, 1], gap="large")
+    with left:
+        demo = load_demo_examples()
+        if demo:
+            with st.expander("Demo examples (SciFact dev, picked by seed; for presenters, not for participants)"):
+                names = [f"{e.get('slot', '?')} · SciFact claim #{e.get('claim_id', '?')} · {e.get('role', '')}" for e in demo]
+                pick = st.selectbox("Example", range(len(demo)), format_func=lambda i: names[i], key="demo_pick")
+                if st.button("Load this example", key="btn_demo"):
+                    e = demo[pick]
+                    fill_example(e["claim"], e.get("title", ""), e["abstract"], e.get("gold"))
+                    log.log("demo_example", slot=e.get("slot"), claim_id=e.get("claim_id"))
+        if st.button("Fill in an invented example", key="btn_example", help="Loads a made-up claim and abstract to try the tool."):
+            fill_example(EXAMPLE["claim"], EXAMPLE["title"], EXAMPLE["abstract"])
+        claim = st.text_area("Your claim: the sentence you want the paper to support", key="claim", height=90,
+                             placeholder="e.g. Antiretroviral therapy reduces the incidence of tuberculosis.",
+                             help="One short, self-contained statement works best. Leave out the citation marker.")
+        if len(claim) > 300:
+            st.caption("Tip: CiteCheck works best on one short claim. Consider splitting long sentences.")
+        mode, ident, title, abstract = source_inputs("chk", pipe.has_corpus)
 
-    if st.button("Check citation", type="primary", key="btn_check"):
-        t0 = time.time()
-        try:
-            if not claim.strip():
-                raise ValueError("Enter a claim to check.")
-            with st.spinner("Reading the evidence…"):
-                if mode == 2:
-                    verdict = pipe.verify_claim(claim)
-                else:
-                    verdict = pipe.verify_against_paper(claim, resolve_paper(mode, ident, title, abstract))
-            st.session_state.verdict = verdict
-            st.session_state.pop("feedback_sent", None)
-            log.log("verify", claim=claim, mode=["paper", "pasted", "corpus"][mode], verdict=verdict.label,
-                    confidence=round(verdict.confidence, 3), abstained=verdict.abstained, n_evidence=len(verdict.evidence),
-                    latency_ms=round(verdict.latency_ms), wall_ms=round(1000 * (time.time() - t0)),
-                    verifier=verdict.backend.get("verifier"), validated=verdict.backend.get("validated"))
-        except (IngestError, ValueError) as e:
-            st.session_state.pop("verdict", None)
-            st.error(str(e))
-            log.log("error", where="verify", message=str(e)[:200])
+        b1, b2 = st.columns([3, 1])
+        clicked = b1.button("Check citation", type="primary", key="btn_check", use_container_width=True)
+        b2.button("Start over", key="btn_clear", on_click=clear_check, use_container_width=True)
+        if clicked:
+            t0 = time.time()
+            problem = missing_input(claim, mode, ident, abstract)
+            if problem:
+                st.session_state.pop("verdict", None)
+                st.warning(problem)
+                log.log("error", where="verify", message=problem[:200])
+            else:
+                try:
+                    with st.spinner("Reading the abstract and weighing the evidence…"):
+                        if mode == 2:
+                            verdict = pipe.verify_claim(claim)
+                        else:
+                            verdict = pipe.verify_against_paper(claim, resolve_paper(mode, ident, title, abstract))
+                    st.session_state.verdict = verdict
+                    st.session_state.pop("feedback_sent", None)
+                    log.log("verify", claim=claim, mode=["paper", "pasted", "corpus"][mode], verdict=verdict.label,
+                            confidence=round(verdict.confidence, 3), abstained=verdict.abstained, n_evidence=len(verdict.evidence),
+                            latency_ms=round(verdict.latency_ms), wall_ms=round(1000 * (time.time() - t0)),
+                            verifier=verdict.backend.get("verifier"), validated=verdict.backend.get("validated"))
+                except (IngestError, ValueError) as e:
+                    st.session_state.pop("verdict", None)
+                    st.error(f"Couldn't check this citation: {e}")
+                    log.log("error", where="verify", message=str(e)[:200])
 
-    v = st.session_state.get("verdict")
-    if v is not None:
-        render_verdict(v)
-        claim_gold = st.session_state.get("demo_gold")
-        if claim_gold and claim_gold[0].strip() == v.claim:          # only if the example's claim was not edited
-            gold = claim_gold[1]
-            mark = "matches" if gold == v.label else "does NOT match"
-            st.info(f"SciFact annotators' label for this claim and paper: **{DISPLAY.get(gold, gold)}**; the model {mark} it.")
-        st.markdown("**Do you agree with this verdict?**")
-        c1, c2, _ = st.columns([1, 1, 4])
-        for col, key, label, val in ((c1, "fb_yes", "👍 Agree", "agree"), (c2, "fb_no", "👎 Disagree", "disagree")):
-            if col.button(label, key=key):
-                st.session_state.feedback_sent = val
-                log.log("feedback", agrees=val == "agree", verdict=v.label)
-        if st.session_state.get("feedback_sent"):
-            st.success(f"Thanks: recorded “{st.session_state.feedback_sent}”.")
-            comment = st.text_input("Anything we got wrong or confusing? (optional)", key="fb_comment")
-            if comment and st.button("Send comment", key="fb_send"):
-                log.log("comment", comment=comment)
-                st.info("Comment saved.")
+    with right:
+        v = st.session_state.get("verdict")
+        if v is None:
+            st.info("**Your verdict will appear here.**  \nEnter a claim and the paper on the left, then press "
+                    "**Check citation**. New here? Press **Fill in an invented example** first.")
+        else:
+            render_verdict(v)
+            claim_gold = st.session_state.get("demo_gold")
+            if claim_gold and claim_gold[0].strip() == v.claim:          # only if the example's claim was not edited
+                gold = claim_gold[1]
+                mark = "matches" if gold == v.label else "does NOT match"
+                st.info(f"SciFact annotators' label for this claim and paper: **{DISPLAY.get(gold, gold)}**; the model {mark} it.")
+            st.markdown("**Do you agree with this verdict?**")
+            c1, c2, _ = st.columns([1, 1, 2])
+            for col, key, label, val in ((c1, "fb_yes", "👍 Agree", "agree"), (c2, "fb_no", "👎 Disagree", "disagree")):
+                if col.button(label, key=key):
+                    st.session_state.feedback_sent = val
+                    log.log("feedback", agrees=val == "agree", verdict=v.label)
+            if st.session_state.get("feedback_sent"):
+                st.success(f"Thanks: recorded “{st.session_state.feedback_sent}”.")
+                comment = st.text_input("Anything we got wrong or confusing? (optional)", key="fb_comment")
+                if comment and st.button("Send comment", key="fb_send"):
+                    log.log("comment", comment=comment)
+                    st.info("Comment saved.")
 
 # ----------------------------------------------------------------------------------------------
 # Tab 2: relevance
@@ -243,6 +302,9 @@ with tab_rel:
                              placeholder="e.g. Using NLP to verify scientific claims against cited evidence")
     rmode, rident, rtitle, rabstract = source_inputs("rel", False)
     if st.button("How relevant is it?", key="btn_rel"):
+        if not direction.strip():
+            st.warning("Describe your research direction first (one or two sentences).")
+            st.stop()
         try:
             paper = resolve_paper(rmode, rident, rtitle, rabstract)
             r = RelevanceScorer().score(direction, paper)
@@ -262,6 +324,9 @@ with tab_audit:
     aud_id = st.text_input("DOI, arXiv id or link of the paper to audit", key="aud_ident")
     n_refs = st.slider("References to check", 3, 15, 8, key="aud_n")
     if st.button("Audit its citations", key="btn_audit"):
+        if not aud_id.strip():
+            st.warning("Enter the DOI, arXiv id or link of the paper whose references you want to check.")
+            st.stop()
         try:
             bar = st.progress(0.0, text="Fetching the reference list…")
             refs = fetcher.fetch_references(aud_id, limit=max(n_refs, 10))
