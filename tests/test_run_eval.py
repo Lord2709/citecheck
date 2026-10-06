@@ -115,3 +115,28 @@ def test_real_transformer_end_to_end_and_finetune(fixture_dir, tmp_path):
     # the fine-tuned checkpoint plugs straight into the evaluation harness
     r = run_eval.main(base_args(fixture_dir, tmp_path / "res", "ft", verifier="nli", extra=["--model", str(out), "--device", "cpu"]))
     assert r["config"]["verifier"].startswith("nli:") and r["timing"]["n_params"] > 0
+
+
+def test_versions_come_from_package_metadata():
+    """Session 5 bug: rank_bm25 has no __version__, so provenance recorded null."""
+    from importlib import metadata
+
+    from eval.run_eval import _versions
+
+    v = _versions()
+    assert v["rank_bm25"] == metadata.version("rank-bm25")
+    assert v["numpy"] == metadata.version("numpy")
+
+
+def test_error_report_names_the_driver_paper():
+    """errors.md used to print the rank-1 title next to sentences taken from the driver paper (#100-style errors)."""
+    from types import SimpleNamespace
+
+    from eval.error_analysis import _driver_label
+
+    corpus = {"1": SimpleNamespace(title="Gold paper"), "2": SimpleNamespace(title="Off-topic paper")}
+    rec = {"driver_doc": "2", "gold_docs": ["1"]}
+    label = _driver_label(rec, {"doc_id": "2", "rank": 2}, corpus)
+    assert "rank 2" in label and "Off-topic paper" in label and "NOT a gold paper" in label
+    assert "a gold evidence paper" in _driver_label({"driver_doc": "1", "gold_docs": ["1"]}, {"doc_id": "1", "rank": 1}, corpus)
+    assert _driver_label({"driver_doc": None, "gold_docs": []}, {"doc_id": "1", "rank": 1}, corpus).startswith("none (abstained)")
