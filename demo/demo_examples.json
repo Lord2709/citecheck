@@ -1,0 +1,221 @@
+{
+  "created_utc": "2026-10-05T13:49:07+00:00",
+  "git_commit": "54a972119a1ec77bf5d90d3043ffc3d4efad8b51",
+  "split": "dev",
+  "seed": 0,
+  "synthetic_fixture": false,
+  "deployed_run": "zero_shot_nli",
+  "validated": true,
+  "verifier": "nli:MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
+  "tau": 0.6,
+  "k": 3,
+  "how_chosen": "seeded order over dev claims with one cited paper; first per-label hits whose verdict equals the gold label, run through the app's paste-an-abstract path",
+  "data_licence": "SciFact claims CC BY 4.0, abstracts ODC-By 1.0 (https://github.com/allenai/scifact)",
+  "examples": [
+    {
+      "claim_id": 721,
+      "claim": "Lupus-prone mice infected with curliproducing bacteria have higher autoantibody titers compared to controls.",
+      "gold": "SUPPORT",
+      "doc_id": "1834762",
+      "title": "Amyloid-DNA Composites of Bacterial Biofilms Stimulate Autoimmunity.",
+      "abstract": "Research on the human microbiome has established that commensal and pathogenic bacteria can influence obesity, cancer, and autoimmunity through mechanisms mostly unknown. We found that a component of bacterial biofilms, the amyloid protein curli, irreversibly formed fibers with bacterial DNA during biofilm formation. This interaction accelerated amyloid polymerization and created potent immunogenic complexes that activated immune cells, including dendritic cells, to produce cytokines such as type I interferons, which are pathogenic in systemic lupus erythematosus (SLE). When given systemically, curli-DNA composites triggered immune activation and production of autoantibodies in lupus-prone and wild-type mice. We also found that the infection of lupus-prone mice with curli-producing bacteria triggered higher autoantibody titers compared to curli-deficient bacteria. These data provide a mechanism by which the microbiome and biofilm-producing enteric infections may contribute to the progression of SLE and point to a potential molecular target for treatment of autoimmunity.",
+      "verdict": "SUPPORT",
+      "display": "SUPPORTS",
+      "confidence": 0.986,
+      "abstained": false,
+      "note": "",
+      "evidence_sentences": [
+        "This interaction accelerated amyloid polymerization and created potent immunogenic complexes that activated immune cells, including dendritic cells, to produce cytokines such as type I interferons, which are pathogenic in systemic lupus erythematosus (SLE).",
+        "When given systemically, curli-DNA composites triggered immune activation and production of autoantibodies in lupus-prone and wild-type mice.",
+        "We also found that the infection of lupus-prone mice with curli-producing bacteria triggered higher autoantibody titers compared to curli-deficient bacteria."
+      ],
+      "probs": {
+        "support": 0.9860216975212097,
+        "neutral": 0.008916663005948067,
+        "contradict": 0.00506157660856843
+      },
+      "latency_ms": 352,
+      "slot": "SUPPORT-1",
+      "role": "main",
+      "tried_before": 1
+    },
+    {
+      "claim_id": 936,
+      "claim": "Peroxynitrite is required for nitration of TCR/CD8.",
+      "gold": "SUPPORT",
+      "doc_id": "5483793",
+      "title": "Altered recognition of antigen is a mechanism of CD8+ T cell tolerance in cancer",
+      "abstract": "Antigen-specific CD8+ T-cell tolerance, induced by myeloid-derived suppressor cells (MDSCs), is one of the main mechanisms of tumor escape. Using in vivo models, we show here that MDSCs directly disrupt the binding of specific peptide–major histocompatibility complex (pMHC) dimers to CD8-expressing T cells through nitration of tyrosines in a T-cell receptor (TCR)-CD8 complex. This process makes CD8-expressing T cells unable to bind pMHC and to respond to the specific peptide, although they retain their ability to respond to nonspecific stimulation. Nitration of TCR-CD8 is induced by MDSCs through hyperproduction of reactive oxygen species and peroxynitrite during direct cell-cell contact. Molecular modeling suggests specific sites of nitration that might affect the conformational flexibility of TCR-CD8 and its interaction with pMHC. These data identify a previously unknown mechanism of T-cell tolerance in cancer that is also pertinent to many pathological conditions associated with accumulation of MDSCs.",
+      "verdict": "SUPPORT",
+      "display": "SUPPORTS",
+      "confidence": 0.9844,
+      "abstained": false,
+      "note": "",
+      "evidence_sentences": [
+        "Using in vivo models, we show here that MDSCs directly disrupt the binding of specific peptide–major histocompatibility complex (pMHC) dimers to CD8-expressing T cells through nitration of tyrosines in a T-cell receptor (TCR)-CD8 complex.",
+        "Nitration of TCR-CD8 is induced by MDSCs through hyperproduction of reactive oxygen species and peroxynitrite during direct cell-cell contact.",
+        "Molecular modeling suggests specific sites of nitration that might affect the conformational flexibility of TCR-CD8 and its interaction with pMHC."
+      ],
+      "probs": {
+        "support": 0.984393298625946,
+        "neutral": 0.009839835576713085,
+        "contradict": 0.00576682947576046
+      },
+      "latency_ms": 244,
+      "slot": "SUPPORT-2",
+      "role": "backup",
+      "tried_before": 3
+    },
+    {
+      "claim_id": 212,
+      "claim": "CR is associated with higher methylation age.",
+      "gold": "CONTRADICT",
+      "doc_id": "22038539",
+      "title": "Caloric restriction delays age-related methylation drift",
+      "abstract": "In mammals, caloric restriction consistently results in extended lifespan. Epigenetic information encoded by DNA methylation is tightly regulated, but shows a striking drift associated with age that includes both gains and losses of DNA methylation at various sites. Here, we report that epigenetic drift is conserved across species and the rate of drift correlates with lifespan when comparing mice, rhesus monkeys, and humans. Twenty-two to 30-year-old rhesus monkeys exposed to 30% caloric restriction since 7-14 years of age showed attenuation of age-related methylation drift compared to ad libitum-fed controls such that their blood methylation age appeared 7 years younger than their chronologic age. Even more pronounced effects were seen in 2.7-3.2-year-old mice exposed to 40% caloric restriction starting at 0.3 years of age. The effects of caloric restriction on DNA methylation were detectable across different tissues and correlated with gene expression. We propose that epigenetic drift is a determinant of lifespan in mammals. Caloric restriction has been shown to increase lifespan in mammals. Here, the authors provide evidence that age-related methylation drift correlates with lifespan and that caloric restriction in mice and rhesus monkeys results in attenuation of age-related methylation drift.",
+      "verdict": "CONTRADICT",
+      "display": "CONTRADICTS",
+      "confidence": 0.9063,
+      "abstained": false,
+      "note": "",
+      "evidence_sentences": [
+        "Epigenetic information encoded by DNA methylation is tightly regulated, but shows a striking drift associated with age that includes both gains and losses of DNA methylation at various sites.",
+        "Twenty-two to 30-year-old rhesus monkeys exposed to 30% caloric restriction since 7-14 years of age showed attenuation of age-related methylation drift compared to ad libitum-fed controls such that their blood methylation age appeared 7 years younger than their chronologic age.",
+        "Here, the authors provide evidence that age-related methylation drift correlates with lifespan and that caloric restriction in mice and rhesus monkeys results in attenuation of age-related methylation drift."
+      ],
+      "probs": {
+        "support": 0.035301923751831055,
+        "neutral": 0.05842864513397217,
+        "contradict": 0.9062694907188416
+      },
+      "latency_ms": 231,
+      "slot": "CONTRADICT-1",
+      "role": "main",
+      "tried_before": 1
+    },
+    {
+      "claim_id": 216,
+      "claim": "CX3CR1 on the Th2 cells impairs T cell survival",
+      "gold": "CONTRADICT",
+      "doc_id": "21366394",
+      "title": "CX3CR1 is required for airway inflammation by promoting T helper cell survival and maintenance in inflamed lung",
+      "abstract": "Allergic asthma is a T helper type 2 (T(H)2)-dominated disease of the lung. In people with asthma, a fraction of CD4(+) T cells express the CX3CL1 receptor, CX3CR1, and CX3CL1 expression is increased in airway smooth muscle, lung endothelium and epithelium upon allergen challenge. Here we found that untreated CX3CR1-deficient mice or wild-type (WT) mice treated with CX3CR1-blocking reagents show reduced lung disease upon allergen sensitization and challenge. Transfer of WT CD4(+) T cells into CX3CR1-deficient mice restored the cardinal features of asthma, and CX3CR1-blocking reagents prevented airway inflammation in CX3CR1-deficient recipients injected with WT T(H)2 cells. We found that CX3CR1 signaling promoted T(H)2 survival in the inflamed lungs, and injection of B cell leukemia/lymphoma-2 protein (BCl-2)-transduced CX3CR1-deficient T(H)2 cells into CX3CR1-deficient mice restored asthma. CX3CR1-induced survival was also observed for T(H)1 cells upon airway inflammation but not under homeostatic conditions or upon peripheral inflammation. Therefore, CX3CR1 and CX3CL1 may represent attractive therapeutic targets in asthma.",
+      "verdict": "CONTRADICT",
+      "display": "CONTRADICTS",
+      "confidence": 0.9984,
+      "abstained": false,
+      "note": "",
+      "evidence_sentences": [
+        "In people with asthma, a fraction of CD4(+) T cells express the CX3CL1 receptor, CX3CR1, and CX3CL1 expression is increased in airway smooth muscle, lung endothelium and epithelium upon allergen challenge.",
+        "We found that CX3CR1 signaling promoted T(H)2 survival in the inflamed lungs, and injection of B cell leukemia/lymphoma-2 protein (BCl-2)-transduced CX3CR1-deficient T(H)2 cells into CX3CR1-deficient mice restored asthma.",
+        "CX3CR1-induced survival was also observed for T(H)1 cells upon airway inflammation but not under homeostatic conditions or upon peripheral inflammation."
+      ],
+      "probs": {
+        "support": 0.0006188182160258293,
+        "neutral": 0.0009624288068152964,
+        "contradict": 0.9984188079833984
+      },
+      "latency_ms": 242,
+      "slot": "CONTRADICT-2",
+      "role": "backup",
+      "tried_before": 4
+    },
+    {
+      "claim_id": 1199,
+      "claim": "The benefits of colchicine were achieved with effective widespread use of secondary prevention strategies such as high-dose statins.",
+      "gold": "NEI",
+      "doc_id": "16760369",
+      "title": "Comparative determinants of 4-year cardiovascular event rates in stable outpatients at risk of or with atherothrombosis.",
+      "abstract": "CONTEXT Clinicians and trialists have difficulty with identifying which patients are highest risk for cardiovascular events. Prior ischemic events, polyvascular disease, and diabetes mellitus have all been identified as predictors of ischemic events, but their comparative contributions to future risk remain unclear.   \n OBJECTIVE To categorize the risk of cardiovascular events in stable outpatients with various initial manifestations of atherothrombosis using simple clinical descriptors.   \n DESIGN, SETTING, AND PATIENTS Outpatients with coronary artery disease, cerebrovascular disease, or peripheral arterial disease or with multiple risk factors for atherothrombosis were enrolled in the global Reduction of Atherothrombosis for Continued Health (REACH) Registry and were followed up for as long as 4 years. Patients from 3647 centers in 29 countries were enrolled between 2003 and 2004 and followed up until 2008. Final database lock was in April 2009.   \n MAIN OUTCOME MEASURES Rates of cardiovascular death, myocardial infarction, and stroke.   \n RESULTS A total of 45,227 patients with baseline data were included in this 4-year analysis. During the follow-up period, a total of 5481 patients experienced at least 1 event, including 2315 with cardiovascular death, 1228 with myocardial infarction, 1898 with stroke, and 40 with both a myocardial infarction and stroke on the same day. Among patients with atherothrombosis, those with a prior history of ischemic events at baseline (n = 21,890) had the highest rate of subsequent ischemic events (18.3%; 95% confidence interval [CI], 17.4%-19.1%); patients with stable coronary, cerebrovascular, or peripheral artery disease (n = 15,264) had a lower risk (12.2%; 95% CI, 11.4%-12.9%); and patients without established atherothrombosis but with risk factors only (n = 8073) had the lowest risk (9.1%; 95% CI, 8.3%-9.9%) (P < .001 for all comparisons). In addition, in multivariable modeling, the presence of diabetes (hazard ratio [HR], 1.44; 95% CI, 1.36-1.53; P < .001), an ischemic event in the previous year (HR, 1.71; 95% CI, 1.57-1.85; P < .001), and polyvascular disease (HR, 1.99; 95% CI, 1.78-2.24; P < .001) each were associated with a significantly higher risk of the primary end point.   \n CONCLUSION Clinical descriptors can assist clinicians in identifying high-risk patients within the broad range of risk for outpatients with atherothrombosis.",
+      "verdict": "NEI",
+      "display": "NOT ENOUGH EVIDENCE",
+      "confidence": 0.9808,
+      "abstained": true,
+      "note": "strongest evidence 0.02 is below threshold 0.60",
+      "evidence_sentences": [
+        "CONTEXT Clinicians and trialists have difficulty with identifying which patients are highest risk for cardiovascular events.",
+        "Prior ischemic events, polyvascular disease, and diabetes mellitus have all been identified as predictors of ischemic events, but their comparative contributions to future risk remain unclear.",
+        "CONCLUSION Clinical descriptors can assist clinicians in identifying high-risk patients within the broad range of risk for outpatients with atherothrombosis."
+      ],
+      "probs": {
+        "support": 0.0191690344363451,
+        "neutral": 0.9716674089431763,
+        "contradict": 0.009163511916995049
+      },
+      "latency_ms": 224,
+      "slot": "NEI-1",
+      "role": "main",
+      "tried_before": 1
+    },
+    {
+      "claim_id": 268,
+      "claim": "Cold exposure increases BAT recruitment.",
+      "gold": "NEI",
+      "doc_id": "970012",
+      "title": "Cold Exposure Promotes Atherosclerotic Plaque Growth and Instability via UCP1-Dependent Lipolysis",
+      "abstract": "Molecular mechanisms underlying the cold-associated high cardiovascular risk remain unknown. Here, we show that the cold-triggered food-intake-independent lipolysis significantly increased plasma levels of small low-density lipoprotein (LDL) remnants, leading to accelerated development of atherosclerotic lesions in mice. In two genetic mouse knockout models (apolipoprotein E(-/-) [ApoE(-/-)] and LDL receptor(-/-) [Ldlr(-/-)] mice), persistent cold exposure stimulated atherosclerotic plaque growth by increasing lipid deposition. Furthermore, marked increase of inflammatory cells and plaque-associated microvessels were detected in the cold-acclimated ApoE(-/-) and Ldlr(-/-) mice, leading to plaque instability. Deletion of uncoupling protein 1 (UCP1), a key mitochondrial protein involved in thermogenesis in brown adipose tissue (BAT), in the ApoE(-/-) strain completely protected mice from the cold-induced atherosclerotic lesions. Cold acclimation markedly reduced plasma levels of adiponectin, and systemic delivery of adiponectin protected ApoE(-/-) mice from plaque development. These findings provide mechanistic insights on low-temperature-associated cardiovascular risks.",
+      "verdict": "NEI",
+      "display": "NOT ENOUGH EVIDENCE",
+      "confidence": 0.8831,
+      "abstained": true,
+      "note": "strongest evidence 0.12 is below threshold 0.60",
+      "evidence_sentences": [
+        "Here, we show that the cold-triggered food-intake-independent lipolysis significantly increased plasma levels of small low-density lipoprotein (LDL) remnants, leading to accelerated development of atherosclerotic lesions in mice.",
+        "In two genetic mouse knockout models (apolipoprotein E(-/-) [ApoE(-/-)] and LDL receptor(-/-) [Ldlr(-/-)] mice), persistent cold exposure stimulated atherosclerotic plaque growth by increasing lipid deposition.",
+        "Deletion of uncoupling protein 1 (UCP1), a key mitochondrial protein involved in thermogenesis in brown adipose tissue (BAT), in the ApoE(-/-) strain completely protected mice from the cold-induced atherosclerotic lesions."
+      ],
+      "probs": {
+        "support": 0.01420974638313055,
+        "neutral": 0.8688613772392273,
+        "contradict": 0.11692892014980316
+      },
+      "latency_ms": 259,
+      "slot": "NEI-2",
+      "role": "backup",
+      "tried_before": 2
+    }
+  ],
+  "failure": {
+    "claim_id": 279,
+    "claim": "Commelina yellow mottle virus' (ComYMV) genome consists of 7489 baise pairs.",
+    "gold": "SUPPORT",
+    "doc_id": "14376683",
+    "title": "Properties of Commelina yellow mottle virus's complete DNA sequence, genomic discontinuities and transcript suggest that it is a pararetrovirus.",
+    "abstract": "The non-enveloped bacilliform viruses are the second group of plant viruses known to possess a genome consisting of circular double-stranded DNA. We have characterized the viral transcript and determined the complete sequence of the genome of Commelina mellow mottle virus (CoYMV), a member of this group. Analysis of the viral transcript indicates that the virus encodes a single terminally-redundant genome-length plus 120 nucleotide transcript. A fraction of the transcripts is polyadenylated, although the majority of the transcript is not polyadenylated. Analysis of the genome sequence indicates that the genome is 7489 bp in size and that the transcribed strand contains three open reading frames capable of encoding proteins of 23, 15 and 216 kd. The function of the 25 and 15 kd proteins is unknown. Similarities between the 216 kd polypeptide and the cauliflower mosaic virus coat protein and protease/reverse transcriptase polyprotein suggest that the 216 kd polypeptide is a polyprotein that is proteolytically processed to yield the virion coat protein, a protease, and replicase (reverse transcriptase and ribonuclease H). Each strand of the CoYMV genome is interrupted by site-specific discontinuities. The locations of the 5'-ends of these discontinuities, and the presence and location of a region on the CoYMV transcript capable of annealing with the 3'-end of cytosolic initiator methionine tRNA are consistent with replication by reverse transcription. We have demonstrated that a construct containing 1.3 CoYMV genomes is infective when introduced into Commelina diffusa, the host for CoYMV, using Agrobacterium-mediated infection.",
+    "verdict": "CONTRADICT",
+    "display": "CONTRADICTS",
+    "confidence": 0.9749,
+    "abstained": false,
+    "note": "",
+    "evidence_sentences": [
+      "We have characterized the viral transcript and determined the complete sequence of the genome of Commelina mellow mottle virus (CoYMV), a member of this group.",
+      "Analysis of the genome sequence indicates that the genome is 7489 bp in size and that the transcribed strand contains three open reading frames capable of encoding proteins of 23, 15 and 216 kd.",
+      "We have demonstrated that a construct containing 1.3 CoYMV genomes is infective when introduced into Commelina diffusa, the host for CoYMV, using Agrobacterium-mediated infection."
+    ],
+    "probs": {
+      "support": 0.01387170609086752,
+      "neutral": 0.0112489964812994,
+      "contradict": 0.974879264831543
+    },
+    "latency_ms": 240,
+    "slot": "FAILURE",
+    "role": "honest failure"
+  },
+  "tried": {
+    "SUPPORT": {
+      "candidates": 76,
+      "tried": 3,
+      "kept": 2
+    },
+    "CONTRADICT": {
+      "candidates": 43,
+      "tried": 4,
+      "kept": 2
+    },
+    "NEI": {
+      "candidates": 86,
+      "tried": 2,
+      "kept": 2
+    }
+  }
+}
