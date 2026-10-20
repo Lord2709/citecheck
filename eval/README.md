@@ -1,6 +1,6 @@
 # eval/ : the evaluation harness
 
-Owner: Data & Evaluation (Sahil).  **One command produces every number we report.**
+Owner: Data & Evaluation.  **One command produces every number we report.**
 
 ```bash
 # 0. one-time: get SciFact (writes data/scifact/*.jsonl + MANIFEST.json)
@@ -61,3 +61,28 @@ corpus once (cached in `data/cache/`).
 `results.json` (everything, with provenance), `predictions.jsonl` (per-claim predictions and probabilities),
 `summary.md` (human-readable), later `errors.md` / `errors.csv`.  `eval/results/LATEST.md` is the table of all runs.
 **Commit `eval/results/` (small) but not `eval/cache/` or `models/`.**
+
+## Fit / calibration split of train (Session 7, for fine-tuning)
+
+```
+python -m eval.train_split                     # writes data/splits/scifact_train_v1.json (claim ids only; commit it)
+python -m eval.finetune_nli --split-file data/splits/scifact_train_v1.json --pairs-only      # pair counts, no torch
+python -m eval.run_eval --name <run> ... --tune-split-file data/splits/scifact_train_v1.json  # tau tuned on the calib part
+```
+
+Training uses only the **fit** part; calibration and every threshold (tau, later tau strict and the escalation rule) use
+only the **calib** part; dev is for reporting only. Runs of a model that never saw SciFact (zero-shot) may keep the old
+default (tau on 200 random train claims); any model trained on SciFact must use `--tune-split-file`, otherwise tau is tuned
+on claims it was trained on. See `docs/agent_plan.md`, Part 2.
+
+## Agent evaluation (Session 7): `eval/agent_eval.py`
+
+```
+python -m eval.agent_eval swap --name agent_swap --verifier nli --split dev            # E3, offline, ~minutes on CPU
+python -m eval.agent_eval escalation --gold data/cache/realworld/gold_v1.jsonl          # E2, needs internet + the real-world set
+```
+
+E3 cites a wrong-but-plausible paper (best non-gold BM25 hit) for each SciFact SUPPORT claim and measures whether the
+agent flags it and what it suggests instead; "suggestions that are not gold" is an UPPER bound on bad replacements,
+because SciFact labels only the papers each claim cites. tau is the deployed one (tuned on train); tau_strict is the
+agent's placeholder until it is tuned on the calibration part. Targets: `docs/north_star.md`.
