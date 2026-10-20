@@ -1,10 +1,13 @@
-"""Fine-tune the NLI verifier on SciFact TRAIN.   Owner: Data & Evaluation (Sahil).   (STRETCH goal)
+"""Fine-tune the NLI verifier on SciFact TRAIN.   Owner: Data & Evaluation.   (STRETCH goal)
 
-    python -m eval.finetune_nli --out models/citecheck-nli-ft --epochs 2 --lr 1e-5 --batch-size 8
+    python -m eval.train_split                                    # once: makes data/splits/scifact_train_v1.json
+    python -m eval.finetune_nli --split-file data/splits/scifact_train_v1.json --pairs-only   # check the pairs, no torch
+    python -m eval.finetune_nli --split-file data/splits/scifact_train_v1.json --out models/citecheck-nli-ft --epochs 2 --lr 1e-5 --batch-size 8
     python -m eval.run_eval --name finetuned_nli --retriever bm25 --verifier nli --model models/citecheck-nli-ft \\
         --oracle --compare-with eval/results/zero_shot_nli
 
-What it trains on (train split only; dev/test are never read):
+What it trains on (train split only; dev/test are never read; with --split-file, only the FIT part of train, so the
+calibration part stays unseen for temperature scaling and threshold tuning):
   * positives : gold rationale sentences of each evidence paper -> SUPPORT / CONTRADICT
   * NEI       : for claims with no evidence, the best sentences of the papers the claim cited -> neutral
   * hard negatives: papers OUR retriever ranks high that are not gold -> neutral (teaches the model to
@@ -21,6 +24,7 @@ import random
 import time
 from pathlib import Path
 
+from eval.train_split import load_split, select_part
 from src.data_io import MIXED, find_scifact_dir, load_claims, load_corpus, sha256_file
 from src.evidence import LexicalSentenceScorer, build_premise, select_sentences
 from src.nli import DEFAULT_NLI_MODEL, resolve_label_indices
@@ -59,6 +63,36 @@ def build_training_pairs(claims, corpus_by_id, retriever, scorer, m=3, neg_per_c
     return pairs
 
 
+def prepare_pairs(a):
+    """Load train (optionally only one part of the split) and build the pairs.  Never opens dev or test."""
+    data_dir = find_scifact_dir(a.data_dir)
+    if data_dir is None:
+        raise SystemExit("SciFact not found. Run: python -m data.fetch_scifact")
+    corpus = load_corpus(data_dir / "corpus.jsonl")
+    by_id = {d.doc_id: d for d in corpus}
+    train_path = data_dir / "claims_train.jsonl"  # dev and test are deliberately never opened here
+    claims = load_claims(train_path)
+    if a.split_file:
+        split = load_split(a.split_file)
+        claims = select_part(claims, split, a.part, train_path=train_path)
+        info = {"which": f"{a.part} part of {a.split_file}", "split_file": str(a.split_file), "part": a.part,
+                "split_sha256": split["source_sha256"][:16], "n_claims": len(claims)}
+    else:
+        print("WARNING: no --split-file, training on ALL of train; then tau must not be tuned on train claims.")
+        info = {"which": "all of train (no split file)", "split_file": None, "part": None, "n_claims": len(claims)}
+    pairs = build_training_pairs(claims, by_id, BM25Retriever(corpus), LexicalSentenceScorer.from_docs(corpus),
+                                 m=a.sentences, neg_per_claim=a.neg_per_claim)
+    counts = {k: sum(1 for p in pairs if p[2] == k) for k in ("support", "neutral", "contradict")}
+    return pairs, counts, info, train_path
+
+
+def export_pairs(pairs, path):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for premise, claim, label in pairs:
+            f.write(json.dumps({"premise": premise, "claim": claim, "label": label}) + "\n")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=DEFAULT_NLI_MODEL)
@@ -74,27 +108,29 @@ def main(argv=None):
     ap.add_argument("--class-weights", default="auto", choices=["auto", "none"])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default=None)
+    ap.add_argument("--split-file", default=None,
+                    help="data/splits/scifact_train_v1.json from eval.train_split: train on its fit part only")
+    ap.add_argument("--part", default="fit", choices=["fit", "calib"], help="which part of the split to train on (fit!)")
+    ap.add_argument("--pairs-only", action="store_true", help="build the pairs, print counts, stop (no torch needed)")
+    ap.add_argument("--export-pairs", default=None,
+                    help="also write the pairs as JSONL (put it under data/cache/: it holds SciFact text, never commit it)")
     a = ap.parse_args(argv)
+
+    random.seed(a.seed)
+    pairs, counts, claims_info, train_path = prepare_pairs(a)
+    print(f"{len(pairs)} training pairs from {claims_info['n_claims']} claims ({claims_info['which']}): {counts}")
+    if a.export_pairs:
+        export_pairs(pairs, a.export_pairs)
+        print(f"[written] {a.export_pairs}")
+    if a.pairs_only:
+        return {"n_pairs": len(pairs), "class_counts": counts, **claims_info}
 
     import numpy as np
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
-    random.seed(a.seed)
     np.random.seed(a.seed)
     torch.manual_seed(a.seed)
-
-    data_dir = find_scifact_dir(a.data_dir)
-    if data_dir is None:
-        raise SystemExit("SciFact not found. Run: python -m data.fetch_scifact")
-    corpus = load_corpus(data_dir / "corpus.jsonl")
-    by_id = {d.doc_id: d for d in corpus}
-    train_path = data_dir / "claims_train.jsonl"  # dev and test are deliberately never opened here
-    claims = load_claims(train_path)
-    pairs = build_training_pairs(claims, by_id, BM25Retriever(corpus), LexicalSentenceScorer.from_docs(corpus),
-                                 m=a.sentences, neg_per_claim=a.neg_per_claim)
-    counts = {k: sum(1 for p in pairs if p[2] == k) for k in ("support", "neutral", "contradict")}
-    print(f"{len(pairs)} training pairs: {counts}")
 
     dev = a.device or ("cuda" if torch.cuda.is_available() else "cpu")
     tok = AutoTokenizer.from_pretrained(a.base)
@@ -146,7 +182,7 @@ def main(argv=None):
     tok.save_pretrained(out)
     (out / "train_log.json").write_text(json.dumps({
         "base": a.base, "args": vars(a), "n_pairs": len(pairs), "class_counts": counts, "loss_log": log,
-        "train_file_sha256": sha256_file(train_path)[:16], "seconds": time.time() - t0,
+        "train_file_sha256": sha256_file(train_path)[:16], "claims": claims_info, "seconds": time.time() - t0,
         "note": "trained on claims_train.jsonl only; evaluate with eval.run_eval on dev",
     }, indent=2), encoding="utf-8")
     print(f"[saved] {out}")

@@ -1,4 +1,4 @@
-"""One command that produces every number we report.   Owner: Data & Evaluation (Sahil).
+"""One command that produces every number we report.   Owner: Data & Evaluation.
 
 Examples (run from the repo root):
 
@@ -261,6 +261,10 @@ def build_parser():
     p.add_argument("--margin", type=float, default=0.0)
     p.add_argument("--tune-split", default="train", choices=["train", "dev", "none"])
     p.add_argument("--tune-n", type=int, default=200, help="claims used to tune tau")
+    p.add_argument("--tune-split-file", default=None,
+                   help="data/splits/scifact_train_v1.json: tune tau only on one part of train (use with a fine-tuned model)")
+    p.add_argument("--tune-part", default="calib", choices=["fit", "calib"],
+                   help="part of --tune-split-file to tune on; calib keeps tau off the claims the model was trained on")
     p.add_argument("--allow-leak", action="store_true", help="allow tuning on the evaluation split (recorded in results)")
     p.add_argument("--oracle", action="store_true", help="also run oracle-paper and oracle-rationale ablations")
     p.add_argument("--compare-with", action="append", default=[], help="results dir of another run (paired bootstrap)")
@@ -324,19 +328,35 @@ def run(args) -> dict:
             sys.exit("Refusing to tune tau on the split you report on. Use --tune-split train (default) or --allow-leak.")
         tune_path = data_dir / f"claims_{args.tune_split}.jsonl"
         tune_claims = sorted(load_claims(tune_path), key=lambda c: c.id)
+        split_info = None
+        if args.tune_split_file:
+            if args.tune_split != "train":
+                sys.exit("--tune-split-file splits TRAIN; use it with --tune-split train.")
+            from eval.train_split import load_split, select_part
+
+            split = load_split(args.tune_split_file)
+            try:
+                tune_claims = select_part(tune_claims, split, args.tune_part, train_path=tune_path)
+            except ValueError as e:
+                sys.exit(f"--tune-split-file: {e}")
+            split_info = {"split_file": str(args.tune_split_file), "part": args.tune_part,
+                          "split_sha256": split["source_sha256"][:16]}
         rng = np.random.default_rng(args.seed)
         if len(tune_claims) > args.tune_n:
             pick = sorted(rng.choice(len(tune_claims), args.tune_n, replace=False))
             tune_claims = [tune_claims[i] for i in pick]
         if args.limit:
             tune_claims = tune_claims[: args.limit]
-        tune_out = get(f"tune-{args.tune_split}", tune_claims, "e2e")["outputs"]
+        tune_name = f"tune-{args.tune_split}" + (f"-{args.tune_part}-{split_info['split_sha256']}" if split_info else "")
+        tune_out = get(tune_name, tune_claims, "e2e")["outputs"]  # distinct cache key per split part
         best = tune_tau(tune_out, args.margin)
         tau = best["tau"]
         tuning = {
             "method": "grid_max_macro_f1", "split": args.tune_split, "n_claims": len(tune_claims),
             "tuned_macro_f1": best["macro_f1"], "leak": args.tune_split == args.split,
         }
+        if split_info:
+            tuning.update(split_info)
 
     # ---- end-to-end ------------------------------------------------------------------------
     e2e = get(args.split, claims, "e2e")
