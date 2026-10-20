@@ -1,4 +1,4 @@
-"""Privacy-preserving usage log: the raw material for user evidence.   Owner: Engineering (Sakshaat).
+"""Privacy-preserving usage log: the raw material for user evidence.   Owner: Engineering.
 
 One JSON object per line, e.g.
 
@@ -21,7 +21,7 @@ from typing import Optional
 
 from .text_utils import redact
 
-TEXT_KEYS = ("claim", "comment", "abstract", "direction", "identifier", "notes")
+TEXT_KEYS = ("claim", "comment", "abstract", "direction", "identifier", "notes", "draft")
 
 
 class UsageLogger:
@@ -52,3 +52,22 @@ class UsageLogger:
             with open(self.path, "a", encoding="utf-8", newline="\n") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         return rec
+
+    def session_events(self) -> list:
+        """This browser session's events only (for the researcher's "download this session" button on the hosted app,
+        where the server's log file is wiped on every restart).  Other people's sessions are never included."""
+        if not self.path.exists():
+            return []
+        out = []
+        with open(self.path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("session_id") == self.session_id:
+                    out.append(rec)
+        return out
+
+    def session_jsonl(self) -> str:
+        return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in self.session_events())
