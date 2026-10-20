@@ -1,4 +1,4 @@
-"""CiteCheck web app.   Owner: Engineering (Sakshaat).
+"""CiteCheck web app.   Owner: Engineering.
 
     streamlit run app/streamlit_app.py
 
@@ -9,6 +9,8 @@ Environment (all optional):
   CITECHECK_DEMO_EXAMPLES=demo/demo_examples.json           live-demo examples (written by `python -m eval.pick_demo_examples`)
   CITECHECK_MAILTO=you@umd.edu                              polite-pool e-mail for OpenAlex requests
   S2_API_KEY=...                                            optional Semantic Scholar key (fewer rate limits)
+  OPENALEX_API_KEY=...                                      optional free OpenAlex key (OpenAlex meters usage)
+  CITECHECK_SEARCH_SOURCES=openalex,s2,arxiv                where the agent searches for papers (add ,corpus for SciFact)
 """
 import json
 import os
@@ -20,9 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st  # noqa: E402
 
+from src.agent import build_agent  # noqa: E402
 from src.ingest import Fetcher, IngestError, paper_from_text  # noqa: E402
+from src.pdf_check import PdfRejected, check_pdf, extract_page_texts  # noqa: E402
 from src.pipeline import build_pipeline  # noqa: E402
 from src.relevance import RelevanceScorer  # noqa: E402
+from src.report import summarize, table_rows, to_markdown  # noqa: E402
 from src.schema import CONTRADICT, DISPLAY, NEI, SUPPORT  # noqa: E402
 from src.text_utils import truncate  # noqa: E402
 from src.usage_log import UsageLogger  # noqa: E402
@@ -57,6 +62,11 @@ def get_pipeline():
 @st.cache_resource
 def get_fetcher():
     return Fetcher()
+
+
+@st.cache_resource
+def get_agent():
+    return build_agent(get_pipeline(), get_fetcher())
 
 
 def logger() -> UsageLogger:
@@ -94,6 +104,8 @@ def sidebar():
     if m.get("validated") and not m.get("demo_only"):
         st.sidebar.caption("This is the exact model whose accuracy we report (eval/results). The numbers are from SciFact, "
                            "a biomedical dataset.")
+    st.sidebar.info("**Check a draft** and **Find papers** are new agent features. Their verdicts come from the model above, "
+                    "but the agent as a whole (full-text reading, suggested papers) has not been evaluated yet.")
     for w in pipe.warnings:
         st.sidebar.info(w)
     st.sidebar.caption(f"verifier `{m.get('verifier')}` · retriever `{m.get('retriever')}` · tau {m.get('tau')}")
@@ -113,19 +125,24 @@ def sidebar():
                 log.log("task_end", task_id=task, outcome=outcome, elapsed_s=round(time.time() - t0, 1) if t0 else None)
                 st.session_state.task_t0 = None
         st.caption(f"logging to `{log.path}` · text logging {'ON' if log.log_text else 'off'}")
+        st.download_button("Download this session's log", log.session_jsonl(), key="dl_log",
+                           file_name=f"{log.participant or 'session'}_usage.jsonl", mime="application/json",
+                           help="On the hosted app the server log is wiped on restart: download right after each session.")
 
 
 sidebar()
 
 st.title("🔎 CiteCheck")
-st.markdown("**Does the paper you cite really support your claim?** CiteCheck reads the paper's abstract and shows you "
-            "the sentences that decide it, so you can check the verdict yourself.")
+st.markdown("**Does the paper you cite really support your claim?** CiteCheck finds the papers behind your citations, reads "
+            "them and shows you the sentences that decide each verdict, so you can check it yourself. It can also find "
+            "papers for a research direction.")
 _h1, _h2, _h3 = st.columns(3)
-_h1.markdown("**① Your claim**  \nThe sentence you want to cite the paper for.")
-_h2.markdown("**② The paper**  \nA DOI, arXiv id or link, or paste its abstract.")
-_h3.markdown("**③ The verdict**  \nSupports, contradicts, or not enough evidence, with the sentences that decide it.")
-tab_check, tab_rel, tab_audit, tab_about = st.tabs(
-    ["Check a citation", "Is this paper relevant?", "Audit a paper (experimental)", "About & limits"])
+_h1.markdown("**① Your text**  \nA paragraph or draft with citations, or one claim and the paper you cite.")
+_h2.markdown("**② The papers**  \nCiteCheck resolves each reference and reads the abstract (and the open-access full text when unsure).")
+_h3.markdown("**③ The verdicts**  \nSupports, contradicts, or not enough evidence, with the deciding sentences and better papers to read.")
+tab_draft, tab_find, tab_check, tab_rel, tab_audit, tab_about = st.tabs(
+    ["Check a draft", "Find papers", "Check a citation", "Is this paper relevant?", "Audit a paper (experimental)",
+     "About & limits"])
 
 
 # ----------------------------------------------------------------------------------------------
@@ -364,3 +381,167 @@ That is why the system abstains (“not enough evidence”) unless it is confide
 **Data & privacy.** Evaluation data: SciFact (claims CC BY 4.0, abstracts ODC-By 1.0). Usage logs store no personal
 information; the text you type is only logged in research mode with your consent, with e-mails/phone numbers redacted.
 """)
+
+# ----------------------------------------------------------------------------------------------
+# Agent tab 1: check every citation in a draft
+# ----------------------------------------------------------------------------------------------
+DRAFT_EXAMPLE = """Transformer models rely entirely on attention and dispense with recurrence and convolutions [1]. SciFact pairs
+expert-written scientific claims with abstracts that contain the evidence for them [2]. Deep learning methods learn
+representations of data with multiple levels of abstraction [3]. Attention-only models are always slower to train than
+recurrent ones [1].
+
+References
+[1] Vaswani et al. Attention Is All You Need. NeurIPS 2017. arXiv:1706.03762
+[2] Wadden et al. Fact or Fiction: Verifying Scientific Claims. EMNLP 2020. doi:10.18653/v1/2020.emnlp-main.609
+[3] LeCun, Bengio and Hinton. Deep learning. Nature 2015. doi:10.1038/nature14539
+"""
+OUTCOME_BOX = {"Supported": st.success, "Contradicted": st.error, "Not enough evidence": st.warning,
+               "Could not check": st.info}
+
+
+def render_draft_report(rep: dict):
+    s = summarize(rep)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Citations", s["citations"])
+    c2.metric("Supported", s["supported"])
+    c3.metric("Contradicted", s["contradicted"])
+    c4.metric("Not enough evidence", s["not_enough_evidence"])
+    c5.metric("Could not check", s["could_not_check"])
+    for w in rep.get("warnings") or []:
+        st.info(w)
+    if not rep.get("citations"):
+        return
+    st.dataframe(table_rows(rep), hide_index=True)
+    for c, row in zip(rep["citations"], table_rows(rep)):
+        with st.expander(f"{c['index']}. {row['Outcome']} · {c['marker']} · {truncate(c['claim'], 90)}"):
+            st.markdown(f"**Your sentence:** {c['sentence']}")
+            if c.get("reference_text"):
+                st.markdown(f"**Reference:** {c['reference_text']}")
+            p = c.get("paper")
+            if p:
+                st.markdown(f"**Paper read:** {p.get('title')}" + (f" ({p['year']})" if p.get("year") else "")
+                            + (f" · [link]({p['url']})" if p.get("url") else ""))
+            v = c.get("verdict")
+            if v:
+                where = "the open-access full text" if c.get("read_full_text") else "the abstract"
+                OUTCOME_BOX[row["Outcome"]](f"**{v['display_label']}** (confidence {v['confidence']:.2f}), from {where}")
+                if v.get("evidence"):
+                    st.markdown("**Deciding sentences:**")
+                    for sent in v["evidence"][0]["sentences"]:
+                        st.markdown(f"> {sent}")
+            else:
+                st.info(f"Could not check: {c.get('status_detail')}")
+            for sg in c.get("suggestions") or []:
+                sp = sg["paper"]
+                st.markdown(f"**A paper that does support this claim (to read, not to paste):** {sp.get('title')}"
+                            + (f" · [link]({sp['url']})" if sp.get("url") else "") + f" (confidence {sg['confidence']:.2f})")
+                for sent in sg.get("sentences") or []:
+                    st.markdown(f"> {sent}")
+            st.caption("How the agent decided: " + " → ".join(f"{x['action']}: {x['detail']}" for x in c.get("steps") or []))
+    st.download_button("Download the report (Markdown)", to_markdown(rep), file_name="citecheck_report.md",
+                       mime="text/markdown", key="dl_draft")
+
+
+with tab_draft:
+    st.markdown("Paste a paragraph or a whole draft **with its reference list**. CiteCheck finds every cited sentence, "
+                "looks up each reference, reads the paper and tells you whether it supports the sentence.")
+    src_mode = st.radio("Your text", ["Paste text", "Upload a PDF (text-based)"], horizontal=True, key="draft_src")
+    draft_text = ""
+    if src_mode == "Paste text":
+        if st.button("Load an example (real papers; needs internet)", key="btn_draft_example"):
+            st.session_state.draft = DRAFT_EXAMPLE
+        draft_text = st.text_area("Draft with citations and a 'References' list", key="draft", height=220,
+                                  placeholder="… reduces infection rates [1].\n\nReferences\n[1] Author et al. Title. Venue 2020. doi:10.…")
+    else:
+        up = st.file_uploader("PDF of your draft (scanned PDFs are not supported)", type=["pdf"], key="draft_pdf")
+        if up is not None:
+            try:
+                data = up.getvalue()
+                verdict = check_pdf(data)
+                if not verdict.accepted:
+                    st.error(verdict.user_message())
+                    log.log("pdf_rejected", kind=verdict.kind, n_pages=verdict.n_pages)
+                else:
+                    if verdict.kind == "mixed":
+                        st.info(verdict.user_message())
+                    pages = extract_page_texts(data)
+                    draft_text = "\n".join(pages[i] for i in verdict.text_pages)
+                    st.caption(f"Read {len(verdict.text_pages)} of {verdict.n_pages} pages.")
+            except PdfRejected as e:
+                st.error(str(e))
+    o1, o2, o3 = st.columns(3)
+    escalate = o1.checkbox("Read the open-access full text when unsure", value=True, key="opt_ft")
+    suggest = o2.checkbox("Suggest a paper when a citation fails", value=True, key="opt_suggest")
+    max_cits = o3.number_input("Check at most", min_value=1, max_value=40, value=12, key="opt_max")
+    if st.button("Check every citation", key="btn_draft", type="primary"):
+        if not draft_text.strip():
+            st.warning("Paste your text (with its reference list) or upload a text-based PDF first.")
+        else:
+            agent = get_agent()
+            plan = agent.plan(draft_text)
+            if plan.kind == "discover":
+                st.info("I found no citations in this text. It looks like a research direction: try the **Find papers** tab.")
+                log.log("agent_plan", plan=plan.kind)
+            else:
+                agent.escalate, agent.suggest = escalate, suggest
+                bar = st.progress(0.0, text="Reading your citations…")
+                t0 = time.time()
+                rep = agent.check_draft(draft_text, max_citations=int(max_cits),
+                                        progress=lambda i, n: bar.progress(i / n, text=f"Checking citation {i} of {n}…")).to_dict()
+                bar.empty()
+                st.session_state.draft_report = rep
+                summ = summarize(rep)
+                log.log("draft_check", draft=draft_text, n_citations=summ["citations"], supported=summ["supported"],
+                        contradicted=summ["contradicted"], nei=summ["not_enough_evidence"],
+                        could_not_check=summ["could_not_check"], read_full_text=summ["read_full_text"],
+                        with_suggestion=summ["with_suggestion"], escalate=escalate, suggest=suggest,
+                        seconds=round(time.time() - t0, 1))
+    if st.session_state.get("draft_report"):
+        render_draft_report(st.session_state.draft_report)
+        f1, f2, _ = st.columns([1, 1, 4])
+        if f1.button("👍 This report is useful", key="fb_draft_yes"):
+            log.log("feedback", target="draft_report", agrees=True)
+            st.toast("Thanks, noted.")
+        if f2.button("👎 Something is wrong", key="fb_draft_no"):
+            log.log("feedback", target="draft_report", agrees=False)
+            st.toast("Thanks, noted. Tell the researcher what looked wrong.")
+
+# ----------------------------------------------------------------------------------------------
+# Agent tab 2: find papers for a research direction
+# ----------------------------------------------------------------------------------------------
+with tab_find:
+    st.markdown("Describe your research direction. CiteCheck searches OpenAlex, Semantic Scholar and arXiv, merges what "
+                "they return and ranks it, with the sentence that makes each paper relevant.")
+    fdir = st.text_area("Your research direction", key="find_direction", height=90,
+                        placeholder="e.g. verifying scientific claims against the abstracts of cited papers")
+    n_find = st.slider("How many papers", 5, 20, 10, key="find_n")
+    if st.button("Find papers", key="btn_find", type="primary"):
+        if not fdir.strip():
+            st.warning("Describe your research direction first (one or two sentences).")
+        else:
+            with st.spinner("Searching open sources…"):
+                try:
+                    st.session_state.find_report = get_agent().discover(fdir, k=n_find).to_dict()
+                    r = st.session_state.find_report
+                    log.log("discover", direction=fdir, n_results=len(r["results"]), failed_sources=sorted(r["errors"]))
+                except ValueError as e:
+                    st.warning(str(e))
+    rep = st.session_state.get("find_report")
+    if rep:
+        for srcname, msg in rep["errors"].items():
+            st.info(f"Source `{srcname}` did not answer ({truncate(msg, 100)}); showing results from the others.")
+        if not rep["results"]:
+            st.warning("No papers found. Try fewer or more general words.")
+        st.caption(f"Search query: `{rep['query']}` · {rep['note']}")
+        for i, c in enumerate(rep["results"], 1):
+            p = c["paper"]
+            meta = " · ".join(str(x) for x in (p.get("venue"), p.get("year")) if x)
+            st.markdown(f"**{i}. {p['title']}**" + (f"  \n{meta}" if meta else "")
+                        + (f" · [link]({p['url']})" if p.get("url") else ""))
+            st.caption(f"{c['band']} (score {c['score']:.2f}) · found in {', '.join(c['sources'])}"
+                       + (f" · matched: {', '.join(c['matched_terms'])}" if c["matched_terms"] else "")
+                       + ("" if p.get("has_abstract") else " · no abstract available"))
+            if c["key_sentence"]:
+                st.markdown(f"> {c['key_sentence']}")
+        st.download_button("Download the list (Markdown)", to_markdown(rep), file_name="citecheck_papers.md",
+                           mime="text/markdown", key="dl_find")

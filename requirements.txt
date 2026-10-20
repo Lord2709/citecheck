@@ -1,6 +1,7 @@
 # --- already pinned by the team (Session 4) ---
 rank-bm25==0.2.2
 requests==2.32.3
+pypdf>=4.2           # text-PDF check at upload (src/pdf_check.py); pure Python
 arxiv==2.1.3
 
 # --- core ---
