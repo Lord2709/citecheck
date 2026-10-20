@@ -1,6 +1,9 @@
 # Roadmap: Session 5 to demo day (Dec 1)
 
-Owner: Product (Vyom).  Every week runs the same loop from the guidelines: **build, put it in front of a user, capture raw evidence
+> **Superseded after the midterm (2026-10-20).** The current build order to Dec 1 is in `docs/agent_plan.md`
+> ("Build order"). Kept for the record of what we planned before the pivot.
+
+Owner: Product.  Every week runs the same loop from the guidelines: **build, put it in front of a user, capture raw evidence
 that week, measure one number vs last week, write the report by 5:00pm Tuesday.** Fall Break Oct 13 has no class.
 
 | session / date | build (merged to `main`) | user evidence | number to move | risk we retire |
