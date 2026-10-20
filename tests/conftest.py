@@ -21,3 +21,5 @@ def _no_citecheck_env(monkeypatch):
     one set it themselves with monkeypatch.setenv."""
     for k in [k for k in os.environ if k.startswith("CITECHECK_")]:
         monkeypatch.delenv(k, raising=False)
+    for k in ("OPENALEX_API_KEY", "S2_API_KEY"):  # API keys in the shell must not change what the ingest tests send
+        monkeypatch.delenv(k, raising=False)

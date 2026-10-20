@@ -121,3 +121,15 @@ def test_demo_examples_load_and_show_the_gold_label(monkeypatch, tmp_path, fixtu
 def test_no_demo_file_means_no_demo_panel(app):
     at, _ = app
     assert not [b for b in at.button if b.key == "btn_demo"]
+
+
+def test_agent_tabs_guide_the_user_without_network(app):
+    at, log = app
+    at.button(key="btn_draft").click().run()                                    # nothing pasted
+    assert not at.exception and any("Paste your text" in w.value for w in at.warning)
+    at.text_area(key="draft").set_value("verifying scientific claims against cited abstracts").run()
+    at.button(key="btn_draft").click().run()                                    # no citations: points to Find papers
+    assert not at.exception and any("Find papers" in i.value for i in at.info)
+    at.button(key="btn_find").click().run()                                     # empty direction
+    assert any("research direction" in w.value for w in at.warning)
+    assert any(e["event"] == "agent_plan" for e in events(log))
