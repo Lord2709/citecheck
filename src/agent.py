@@ -122,6 +122,18 @@ def _same_paper(a: Paper, b: Paper) -> bool:
     return a.paper_id == b.paper_id or (bool(norm(a.title)) and norm(a.title) == norm(b.title))
 
 
+def stub_paper(identifier: str, detail: str = "") -> Paper:
+    """A paper we know only by its identifier (and the title the lookup reported), for the full-text route."""
+    m = re.search(r"“(.+?)”", detail or "")
+    title = m.group(1) if m else identifier
+    if identifier.lower().startswith("arxiv:"):
+        aid = identifier.split(":", 1)[1]
+        return Paper(paper_id=f"arxiv:{aid}", title=title, url=f"https://arxiv.org/abs/{aid}", source="arxiv")
+    doi = identifier.lower() if identifier.startswith("10.") else None
+    return Paper(paper_id=f"doi:{doi}" if doi else identifier, title=title, doi=doi,
+                 url=f"https://doi.org/{doi}" if doi else None, source="fulltext")
+
+
 def chunk(sentences: Sequence, size: int = CHUNK_SENTENCES) -> list:
     return [list(sentences[i:i + size]) for i in range(0, len(sentences), size)]
 
@@ -289,7 +301,12 @@ class CiteCheckAgent:
             paper, status, detail = self._timed(r.steps, "fetch paper", lambda: (
                 (x := self._fetch(r.identifier, cache)), (x[0].title[:90] if x[0] else x[2])))
             r.paper, r.status, r.status_detail = paper, status, detail
-            if paper is None:
+            if paper is None and status == "no_abstract":
+                self._check_without_abstract(r, c.claim, draft_year)   # try the open-access full text instead
+            if r.paper is None or r.status != "checked":
+                results.append(r)
+                continue
+            if r.verdict is not None:                                  # already decided from the full text
                 results.append(r)
                 continue
             try:
@@ -300,6 +317,48 @@ class CiteCheckAgent:
             results.append(r)
         return AgentReport(results, warnings, dict(self.pipe.meta), self.tau_strict, parsed.style,
                            datetime.now().astimezone().isoformat(timespec="seconds"))
+
+    def _check_without_abstract(self, r: "CitationResult", claim: str, draft_year: Optional[int]):
+        """The paper exists but no open source gives its abstract (seen live: a Nature paper).  If full-text reading is
+        on, look for a legal open-access copy and judge the claim on it; otherwise leave the citation unchecked."""
+        if not (self.escalate and self.fulltext is not None and r.identifier):
+            r.steps.append(Step("read full text?", "no abstract available and full-text reading is off", 0.0))
+            return
+        stub = stub_paper(r.identifier, r.status_detail)
+        ft = self._timed(r.steps, "find open-access full text", lambda: (
+            (f := self.fulltext.find(stub)), self.fulltext.last_detail if f is None else f"found: {self.fulltext.last_detail}"))
+        if ft is None or not ft.sentences:
+            r.status_detail += " No open-access full text was found either."
+            return
+        try:
+            v = self._timed(r.steps, "verify full text", lambda: (
+                (x := self._verify_full_text(claim, stub, ft.sentences)), f"{x.display_label} (p={x.confidence:.2f}) from {ft.source}"))
+        except Exception as e:
+            r.status, r.status_detail = "error", f"{type(e).__name__}: {str(e)[:120]}"
+            return
+        r.paper, r.status, r.status_detail = stub, "checked", ""
+        r.verdict, r.read_full_text, r.full_text_source = v, True, ft.source
+        if v.label != SUPPORT and self.suggest and self.search is not None:
+            r.suggestions = self._suggest(claim, stub, draft_year, r.steps)
+
+    def recheck_with_abstract(self, citation: dict, title: str, abstract: str, draft_year: Optional[int] = None) -> dict:
+        """The researcher pasted the abstract for a citation we could not check.  Returns the updated citation dict
+        (same shape as CitationResult.to_dict()), marked as checked against a pasted abstract."""
+        from .ingest import paper_from_text
+
+        title = (title or (citation.get("paper") or {}).get("title")
+                 or stub_paper(citation.get("identifier") or "", citation.get("status_detail", "")).title or "Pasted abstract")
+        paper = paper_from_text(title, abstract)
+        steps = [Step(**s) for s in citation.get("steps") or []]
+        steps.append(Step("abstract pasted", "the researcher pasted the abstract for this citation", 0.0))
+        v, read_ft, ft_src, sugg, steps = self.check_claim(citation["claim"], paper, draft_year, steps)
+        r = CitationResult(index=citation["index"], sentence=citation["sentence"], claim=citation["claim"],
+                           marker=citation["marker"], reference_text=citation.get("reference_text", ""),
+                           identifier=citation.get("identifier"), status="checked", paper=paper, verdict=v,
+                           read_full_text=read_ft, full_text_source=ft_src, suggestions=sugg, steps=steps)
+        d = r.to_dict()
+        d["abstract_pasted"] = True
+        return d
 
     # ---- discovery ------------------------------------------------------------------------------
     def discover(self, direction: str, k: int = 10):

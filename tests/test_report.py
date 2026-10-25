@@ -40,3 +40,13 @@ def test_markdown_draft_and_discovery():
     assert "1. **P** (EMNLP, 2020)" in md2 and "did not answer" in md2
     with pytest.raises(ValueError):
         report.to_markdown({"kind": "other"})
+
+
+def test_confidence_display_and_no_run_on_lines():
+    assert report.fmt_conf(0.9993) == "≥ 0.99" and report.fmt_conf(0.871) == "0.87" and report.fmt_conf(None) == "-"
+    md = report.to_markdown(DRAFT)
+    lines = md.splitlines()
+    i = next(k for k, l in enumerate(lines) if l.startswith("**Reference:** Doe 2020"))
+    assert lines[i + 1] == "" and lines[i + 2].startswith("**Paper read:**")      # fields are separate paragraphs
+    assert "confidence 0.91" in md and report.CONF_NOTE in md
+    assert report.table_rows(DRAFT)[0]["Confidence"] == "0.91"
