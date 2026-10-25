@@ -142,3 +142,12 @@ def test_stub_paper():
     assert s.title == "Deep learning" and s.doi == "10.1038/nature14539" and s.paper_id == "doi:10.1038/nature14539"
     a = stub_paper("arXiv:1706.03762")
     assert a.paper_id == "arxiv:1706.03762" and a.url.endswith("1706.03762")
+
+
+def test_author_year_markers_are_shown_as_written():
+    draft = ("Zorvex increases bone density in adult mice (Doe et al., 2021).\n\nReferences\n"
+             "Doe, J. (2021). Zorvex and bone. doi:10.1000/zorvex\n")
+    rep = agent().check_draft(draft)
+    assert rep.citations[0].marker == "(Doe et al., 2021)" and rep.citations[0].verdict.label == SUPPORT
+    missing = agent().check_draft("Statins lower cholesterol in most adults (Roe, 2019).\n\nReferences\n[1] Other.\n")
+    assert missing.citations[0].marker == "(Roe, 2019)" and "no entry for (Roe, 2019)" in missing.citations[0].status_detail

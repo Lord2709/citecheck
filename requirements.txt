@@ -18,6 +18,14 @@ sentencepiece>=0.2   # DeBERTa-v3 tokenizer
 protobuf>=4.25       # DeBERTa-v3 tokenizer conversion
 scikit-learn>=1.3    # used to cross-check our metrics in tests
 
+# --- web site backend (api/) ---
+fastapi>=0.110
+uvicorn>=0.29
+sqlalchemy>=2.0
+python-multipart>=0.0.9
+httpx>=0.27
+psycopg[binary]>=3.1   # Postgres driver for the Supabase database (production only)
+
 # --- app / plots ---
 streamlit>=1.35
 matplotlib>=3.7

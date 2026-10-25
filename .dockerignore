@@ -14,3 +14,5 @@ logs
 evidence/**/raw_unredacted
 *.log
 .env
+web/node_modules
+web/dist
