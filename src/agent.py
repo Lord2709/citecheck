@@ -122,6 +122,19 @@ def _same_paper(a: Paper, b: Paper) -> bool:
     return a.paper_id == b.paper_id or (bool(norm(a.title)) and norm(a.title) == norm(b.title))
 
 
+def marker_text(cited_claim, key: str) -> str:
+    """How the citation was written, for display: "[3]", or "(Smith et al., 2019)" for an author-year key."""
+    if key.isdigit():
+        return f"[{key}]"
+    base = key.rstrip("+")
+    m = re.match(r"([a-z]+)(\d{4})", base)
+    if m:
+        for mk in cited_claim.markers:
+            if m.group(1) in re.sub(r"[^a-z]", "", mk.lower()) and m.group(2) in mk:
+                return mk.strip()
+    return base
+
+
 def stub_paper(identifier: str, detail: str = "") -> Paper:
     """A paper we know only by its identifier (and the title the lookup reported), for the full-text route."""
     m = re.search(r"“(.+?)”", detail or "")
@@ -254,7 +267,9 @@ class CiteCheckAgent:
         return res
 
     def check_draft(self, text: str, draft_year: Optional[int] = None, max_citations: int = 20,
-                    progress: Optional[Callable] = None) -> AgentReport:
+                    progress: Optional[Callable] = None, on_result: Optional[Callable] = None) -> AgentReport:
+        """progress(n, total) is called before each citation; on_result(CitationResult) after each one is finished
+        (the web API uses it to stream results while the rest are still being checked)."""
         parsed = parse_draft(text)
         warnings = list(parsed.warnings)
         pairs = []  # (cited claim, marker, reference key or inline id, is_inline)
@@ -262,13 +277,18 @@ class CiteCheckAgent:
             for ident in c.inline_ids:
                 pairs.append((c, ident, ident, True))
             for k in c.keys:
-                pairs.append((c, f"[{k}]" if k.isdigit() else k.rstrip("+"), k, False))
+                pairs.append((c, marker_text(c, k), k, False))
         if not pairs:
             warnings.append("No citations found. Mark citations as [1] or (Author, year) and add a 'References' list.")
         if len(pairs) > max_citations:
             warnings.append(f"Checked the first {max_citations} of {len(pairs)} citations.")
             pairs = pairs[:max_citations]
         results, cache = [], {}
+
+        def finish(r):
+            results.append(r)
+            if on_result:
+                on_result(r)
         for n, (c, marker, key, inline) in enumerate(pairs, 1):
             if progress:
                 progress(n, len(pairs))
@@ -281,22 +301,22 @@ class CiteCheckAgent:
                 if entry is None:
                     r.status, r.status_detail = "unresolved", f"no entry for {marker} in the reference list"
                     r.steps.append(Step("resolve reference", r.status_detail, 0.0))
-                    results.append(r)
+                    finish(r)
                     continue
                 r.reference_text = entry.text
                 if self.resolver is None:
                     r.status, r.status_detail = "unresolved", "reference resolution is not configured"
-                    results.append(r)
+                    finish(r)
                     continue
                 res = self._timed(r.steps, "resolve reference", lambda: ((x := self.resolver.resolve(entry.text)), x.detail))
                 r.identifier = res.identifier
                 if res.identifier is None:
                     r.status, r.status_detail = "unresolved", res.detail
-                    results.append(r)
+                    finish(r)
                     continue
             if self.fetcher is None:
                 r.status, r.status_detail = "not_found", "paper lookup is not configured"
-                results.append(r)
+                finish(r)
                 continue
             paper, status, detail = self._timed(r.steps, "fetch paper", lambda: (
                 (x := self._fetch(r.identifier, cache)), (x[0].title[:90] if x[0] else x[2])))
@@ -304,17 +324,17 @@ class CiteCheckAgent:
             if paper is None and status == "no_abstract":
                 self._check_without_abstract(r, c.claim, draft_year)   # try the open-access full text instead
             if r.paper is None or r.status != "checked":
-                results.append(r)
+                finish(r)
                 continue
             if r.verdict is not None:                                  # already decided from the full text
-                results.append(r)
+                finish(r)
                 continue
             try:
                 v, read_ft, ft_src, sugg, _ = self.check_claim(c.claim, paper, draft_year, r.steps)
                 r.verdict, r.read_full_text, r.full_text_source, r.suggestions = v, read_ft, ft_src, sugg
             except Exception as e:
                 r.status, r.status_detail = "error", f"{type(e).__name__}: {str(e)[:120]}"
-            results.append(r)
+            finish(r)
         return AgentReport(results, warnings, dict(self.pipe.meta), self.tau_strict, parsed.style,
                            datetime.now().astimezone().isoformat(timespec="seconds"))
 
