@@ -18,7 +18,7 @@ from data import fetch_scifact  # noqa: E402
 from eval import run_eval  # noqa: E402
 from src.config import load_config  # noqa: E402
 from src.pipeline import build_pipeline  # noqa: E402
-from tests.tiny_model import FIXTURE, make_tiny_nli  # noqa: E402
+from tiny_model import FIXTURE, make_tiny_nli  # noqa: E402
 
 APP = str(Path(__file__).resolve().parent.parent / "app" / "streamlit_app.py")
 

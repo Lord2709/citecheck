@@ -93,7 +93,7 @@ def test_real_transformer_end_to_end_and_finetune(fixture_dir, tmp_path):
     from src.data_io import load_corpus
     from src.evidence import LexicalSentenceScorer
     from src.retrieval import BM25Retriever
-    from tests.tiny_model import make_tiny_nli
+    from tiny_model import make_tiny_nli
 
     corpus = load_corpus(fixture_dir / "corpus.jsonl")
     pairs = finetune_nli.build_training_pairs(load_claims(fixture_dir / "claims_train.jsonl"), {d.doc_id: d for d in corpus},
