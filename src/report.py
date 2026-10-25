@@ -21,6 +21,18 @@ OUTCOME = {  # what the researcher sees for each checked citation
 }
 
 
+CONF_NOTE = ("Confidences are the model's scores and are not calibrated yet: \"≥ 0.99\" means the model is very sure, "
+             "not that it is right.")
+
+
+def fmt_conf(c) -> str:
+    """Display a model confidence.  The uncalibrated model often outputs 0.999…; "1.00" would overstate certainty."""
+    if c is None:
+        return "-"
+    c = float(c)
+    return "≥ 0.99" if c >= 0.995 else f"{c:.2f}"
+
+
 def outcome(c: dict) -> str:
     if c.get("status") != "checked" or not c.get("verdict"):
         return "Could not check"
@@ -54,7 +66,7 @@ def table_rows(report: dict) -> list:
             "Claim": c.get("claim", ""),
             "Cited paper": p.get("title") or c.get("reference_text", "")[:80],
             "Outcome": outcome(c),
-            "Confidence": round(v["confidence"], 2) if v.get("confidence") is not None else None,
+            "Confidence": fmt_conf(v["confidence"]) if v.get("confidence") is not None else None,
             "Read full text": "yes" if c.get("read_full_text") else "",
             "Suggestion": (c["suggestions"][0]["paper"].get("title") if c.get("suggestions") else ""),
             "Note": c.get("status_detail", "") if c.get("status") != "checked" else "",
@@ -83,34 +95,34 @@ def draft_to_markdown(report: dict) -> str:
     for c in report.get("citations") or []:
         v = c.get("verdict") or {}
         p = c.get("paper") or {}
-        out += ["", f"## {c.get('index')}. {outcome(c)}", "", f"**Your sentence:** {c.get('sentence', '')}", "",
-                f"**Reference:** {c.get('reference_text', '') or '(none found)'}"]
+        block = [f"## {c.get('index')}. {outcome(c)}", f"**Your sentence:** {c.get('sentence', '')}",
+                 f"**Reference:** {c.get('reference_text', '') or '(none found)'}"]
         if p:
             link = p.get("url") or (f"https://doi.org/{p['doi']}" if p.get("doi") else "")
             year = f" ({p['year']})" if p.get("year") else ""
-            out.append(f"**Paper read:** {p.get('title', '')}{year} {link}".rstrip())
+            block.append(f"**Paper read:** {p.get('title', '')}{year} {link}".rstrip()
+                         + (" (abstract pasted by the researcher)" if c.get("abstract_pasted") else ""))
         if c.get("status") != "checked":
-            out.append(f"**Why it could not be checked:** {c.get('status_detail') or STATUS_TEXT.get(c.get('status'), '')}")
+            block.append(f"**Why it could not be checked:** {c.get('status_detail') or STATUS_TEXT.get(c.get('status'), '')}")
         if v:
-            out.append(f"**Verdict:** {v.get('display_label')} (confidence {v.get('confidence', 0):.2f})"
-                       + (" after reading the open-access full text" if c.get("read_full_text") else " from the abstract"))
-            ev = (v.get("evidence") or [])[:1]
-            for e in ev:
-                out.append("**Deciding sentences:**")
-                out += [f"> {s}" for s in e.get("sentences") or []]
+            block.append(f"**Verdict:** {v.get('display_label')} (confidence {fmt_conf(v.get('confidence'))})"
+                         + (" after reading the open-access full text" if c.get("read_full_text") else " from the abstract"))
+            for e in (v.get("evidence") or [])[:1]:
+                block.append("**Deciding sentences:**\n\n" + "\n".join(f"> {s}" for s in e.get("sentences") or []))
         for sg in c.get("suggestions") or []:
             sp = sg.get("paper") or {}
-            out.append(f"**Suggested paper to read:** {sp.get('title', '')} {sp.get('url') or ''} "
-                       f"(supports the claim with confidence {sg.get('confidence', 0):.2f})".rstrip())
-            out += [f"> {s}" for s in sg.get("sentences") or []]
+            block.append(f"**Suggested paper to read:** {sp.get('title', '')} {sp.get('url') or ''} "
+                         f"(supports the claim with confidence {fmt_conf(sg.get('confidence'))})".rstrip()
+                         + "\n\n" + "\n".join(f"> {s}" for s in sg.get("sentences") or []))
         steps = c.get("steps") or []
         if steps:
-            out.append("<details><summary>How the agent decided</summary>\n")
-            out += [f"- {st.get('action')}: {st.get('detail')}" for st in steps]
-            out.append("\n</details>")
+            block.append("<details><summary>How the agent decided</summary>\n\n"
+                         + "\n".join(f"- {st.get('action')}: {st.get('detail')}" for st in steps) + "\n\n</details>")
+        out += [""] + "\n\n".join(b.rstrip() for b in block).split("\n")   # a blank line between fields: no run-on lines
     b = report.get("backend") or {}
     out += ["", "---", f"Verifier `{b.get('verifier')}`, threshold {b.get('tau')}, strict threshold for suggestions "
-            f"{report.get('tau_strict')}. Generated {report.get('created_at', '')}."]
+            f"{report.get('tau_strict')}. Generated {report.get('created_at', '')}.", "",
+            CONF_NOTE]
     return "\n".join(out) + "\n"
 
 

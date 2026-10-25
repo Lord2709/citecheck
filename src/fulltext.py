@@ -22,6 +22,7 @@ EPMC_SEARCH = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 EPMC_FULLTEXT = "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
 UNPAYWALL = "https://api.unpaywall.org/v2/{doi}"
 MAX_PDF_BYTES = 20_000_000
+MAX_UNPAYWALL_PDFS = 3       # PDF links tried per paper (best location first, then the other open-access locations)
 MIN_SENT, MAX_SENT = 25, 600
 _REF_TAIL = re.compile(r"\n\s*(references|bibliography|literature cited)\s*\n", re.I)
 
@@ -48,6 +49,18 @@ def arxiv_id(paper: Paper) -> Optional[str]:
         if m:
             return m.group(1)
     return None
+
+
+def unpaywall_pdf_urls(record: dict) -> list:
+    """Every PDF link in an Unpaywall record: the best location first, then the others, without duplicates.
+    Seen live on 2026-10-23: a paper can be open access with no PDF link in its best location (only a landing page)."""
+    locs = [record.get("best_oa_location") or {}] + list(record.get("oa_locations") or [])
+    out = []
+    for loc in locs:
+        url = (loc or {}).get("url_for_pdf")
+        if url and url not in out:
+            out.append(url)
+    return out
 
 
 def epmc_body_text(xml_text: str) -> str:
@@ -114,16 +127,19 @@ class FullTextFinder:
             if self.mailto:
                 try:
                     r = self.fetcher._get(UNPAYWALL.format(doi=doi), {"email": self.mailto})
-                    best = ((r.json() if r is not None else {}) or {}).get("best_oa_location") or {}
-                    pdf = best.get("url_for_pdf")
-                    if pdf:
-                        sents = self._pdf_sentences(pdf)
+                    pdfs = unpaywall_pdf_urls((r.json() if r is not None else {}) or {})
+                    if not pdfs:
+                        tried.append("Unpaywall: open-access record has no PDF link")
+                    for pdf in pdfs[:MAX_UNPAYWALL_PDFS]:
+                        try:
+                            sents = self._pdf_sentences(pdf)
+                        except Exception as e:
+                            tried.append(f"Unpaywall PDF: {str(e)[:50]}")
+                            continue
                         if sents:
                             self.last_detail = f"Unpaywall open-access PDF, {len(sents)} sentences"
                             return FullText("unpaywall", pdf, sents)
-                        tried.append("Unpaywall: PDF has no text")
-                    else:
-                        tried.append("Unpaywall: no open-access PDF")
+                        tried.append("Unpaywall PDF: no text")
                 except Exception as e:
                     tried.append(f"Unpaywall: {str(e)[:60]}")
             else:

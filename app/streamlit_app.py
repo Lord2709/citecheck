@@ -27,7 +27,7 @@ from src.ingest import Fetcher, IngestError, paper_from_text  # noqa: E402
 from src.pdf_check import PdfRejected, check_pdf, extract_page_texts  # noqa: E402
 from src.pipeline import build_pipeline  # noqa: E402
 from src.relevance import RelevanceScorer  # noqa: E402
-from src.report import summarize, table_rows, to_markdown  # noqa: E402
+from src.report import CONF_NOTE, fmt_conf, summarize, table_rows, to_markdown  # noqa: E402
 from src.schema import CONTRADICT, DISPLAY, NEI, SUPPORT  # noqa: E402
 from src.text_utils import truncate  # noqa: E402
 from src.usage_log import UsageLogger  # noqa: E402
@@ -166,9 +166,9 @@ MEANING = {
 def render_verdict(v, key_prefix="v"):
     box = {SUPPORT: st.success, CONTRADICT: st.error, NEI: st.warning}[v.label]
     icon, headline = HEADLINE[v.label]
-    box(f"#### {icon} {headline}\n**Verdict: {v.display_label}**  ·  model confidence {v.confidence:.2f}")
+    box(f"#### {icon} {headline}\n**Verdict: {v.display_label}**  ·  model confidence {fmt_conf(v.confidence)}")
     st.progress(min(max(float(v.confidence), 0.0), 1.0),
-                text=f"Model confidence {v.confidence:.0%}: a score from the model, not a guarantee")
+                text=f"Model confidence {fmt_conf(v.confidence)}: a score from the model, not a guarantee (not calibrated yet)")
     st.caption(MEANING[v.label] + (f"  ({v.note})" if v.label == NEI and v.note else ""))
     if v.evidence:
         st.markdown("**Evidence the model read**")
@@ -353,7 +353,7 @@ with tab_audit:
                 "Cited paper": truncate(r.reference.cited.title, 80),
                 "Citing sentence": truncate(r.reference.context, 140),
                 "Verdict": r.verdict.display_label if r.verdict else f"skipped ({r.skipped_reason})",
-                "Confidence": round(r.verdict.confidence, 2) if r.verdict else None,
+                "Confidence": fmt_conf(r.verdict.confidence) if r.verdict else None,
             } for r in rows]
             st.dataframe(table)
             log.log("audit", identifier=aud_id, n_rows=len(rows), n_checked=sum(1 for r in rows if r.verdict))
@@ -388,7 +388,7 @@ information; the text you type is only logged in research mode with your consent
 DRAFT_EXAMPLE = """Transformer models rely entirely on attention and dispense with recurrence and convolutions [1]. SciFact pairs
 expert-written scientific claims with abstracts that contain the evidence for them [2]. Deep learning methods learn
 representations of data with multiple levels of abstraction [3]. Attention-only models are always slower to train than
-recurrent ones [1].
+recurrent ones [1]. The base Transformer model uses 8 parallel attention heads [1].
 
 References
 [1] Vaswani et al. Attention Is All You Need. NeurIPS 2017. arXiv:1706.03762
@@ -424,20 +424,33 @@ def render_draft_report(rep: dict):
             v = c.get("verdict")
             if v:
                 where = "the open-access full text" if c.get("read_full_text") else "the abstract"
-                OUTCOME_BOX[row["Outcome"]](f"**{v['display_label']}** (confidence {v['confidence']:.2f}), from {where}")
+                OUTCOME_BOX[row["Outcome"]](f"**{v['display_label']}** (confidence {fmt_conf(v['confidence'])}), from {where}"
+                                            + (" (abstract you pasted)" if c.get("abstract_pasted") else ""))
                 if v.get("evidence"):
                     st.markdown("**Deciding sentences:**")
                     for sent in v["evidence"][0]["sentences"]:
                         st.markdown(f"> {sent}")
             else:
                 st.info(f"Could not check: {c.get('status_detail')}")
+                if c.get("status") == "no_abstract" or "no abstract" in (c.get("status_detail") or "").lower():
+                    pasted = st.text_area("Paste this paper's abstract to check the citation against it",
+                                          key=f"paste_abs_{c['index']}", height=120)
+                    if st.button("Check with this abstract", key=f"btn_paste_{c['index']}"):
+                        if not pasted.strip():
+                            st.warning("Paste the abstract first.")
+                        else:
+                            new = get_agent().recheck_with_abstract(c, (p or {}).get("title", ""), pasted)
+                            rep["citations"][c["index"] - 1] = new
+                            log.log("abstract_pasted", citation=c["index"], verdict=new["verdict"]["label"])
+                            st.rerun()
             for sg in c.get("suggestions") or []:
                 sp = sg["paper"]
                 st.markdown(f"**A paper that does support this claim (to read, not to paste):** {sp.get('title')}"
-                            + (f" · [link]({sp['url']})" if sp.get("url") else "") + f" (confidence {sg['confidence']:.2f})")
+                            + (f" · [link]({sp['url']})" if sp.get("url") else "") + f" (confidence {fmt_conf(sg['confidence'])})")
                 for sent in sg.get("sentences") or []:
                     st.markdown(f"> {sent}")
             st.caption("How the agent decided: " + " → ".join(f"{x['action']}: {x['detail']}" for x in c.get("steps") or []))
+    st.caption(CONF_NOTE)
     st.download_button("Download the report (Markdown)", to_markdown(rep), file_name="citecheck_report.md",
                        mime="text/markdown", key="dl_draft")
 

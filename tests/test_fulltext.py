@@ -64,3 +64,21 @@ def test_unpaywall_landing_page_is_not_a_pdf():
            ("pub.example", PdfResp(b"<html>login</html>"))], mailto="me@umd.edu")
     finder = FullTextFinder(f)
     assert finder.find(Paper("doi:10.1/x", doi="10.1/x")) is None and "not a PDF" in finder.last_detail
+
+
+def test_unpaywall_pdf_urls_checks_every_location():
+    from src.fulltext import unpaywall_pdf_urls
+
+    rec = {"best_oa_location": {"url": "https://journal/landing", "url_for_pdf": None},     # seen live on 2026-10-23
+           "oa_locations": [{"url_for_pdf": None}, {"url_for_pdf": "https://repo/a.pdf"}, {"url_for_pdf": "https://repo/a.pdf"}]}
+    assert unpaywall_pdf_urls(rec) == ["https://repo/a.pdf"]
+    assert unpaywall_pdf_urls({}) == []
+
+
+def test_unpaywall_uses_a_non_best_location():
+    f = F([("rest/search", Resp(200, {"resultList": {"result": []}})),
+           ("unpaywall.org", Resp(200, {"is_oa": True, "best_oa_location": {"url_for_pdf": None},
+                                        "oa_locations": [{"url_for_pdf": "https://repo.example/a.pdf"}]})),
+           ("repo.example", PdfResp(make_pdf([BODY * 3])))], mailto="me@umd.edu")
+    ft = FullTextFinder(f).find(Paper("doi:10.1/x", doi="10.1/x"))
+    assert ft is not None and ft.source == "unpaywall" and ft.url == "https://repo.example/a.pdf"

@@ -103,3 +103,42 @@ def test_switches_and_failures_are_reported_not_raised():
 def test_helpers():
     assert chunk(list(range(12)), 5) == [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11]]
     assert default_tau_strict(0.6) == 0.85 and default_tau_strict(0.9) == 0.95
+
+
+NO_ABSTRACT = paper("doi:10.1000/noabs", "Paywalled paper", "", doi="10.1000/noabs")
+
+
+def test_no_abstract_falls_back_to_open_access_full_text():
+    fetcher = FakeFetcher({"10.1000/noabs": NO_ABSTRACT})
+    draft = ("Exercise improves sleep quality in older adults [1].\n\nReferences\n"
+             "[1] Doe. Paywalled paper. 2019. doi:10.1000/noabs\n")
+    ft = FakeFullText({"doi:10.1000/noabs": ["Exercise improves sleep quality in older adults in our trial."]})
+    rep = agent(fetcher=fetcher, fulltext=ft).check_draft(draft)
+    c = rep.citations[0]
+    assert c.status == "checked" and c.read_full_text and c.verdict.label == SUPPORT
+    assert c.paper.title == "Paywalled paper" and c.paper.doi == "10.1000/noabs"      # title taken from the lookup message
+    none = agent(fetcher=fetcher, fulltext=FakeFullText({})).check_draft(draft).citations[0]
+    assert none.status == "no_abstract" and "No open-access full text" in none.status_detail
+    off = agent(fetcher=fetcher, escalate=False).check_draft(draft).citations[0]
+    assert off.status == "no_abstract" and off.steps[-1].detail.startswith("no abstract available")
+
+
+def test_recheck_with_pasted_abstract():
+    fetcher = FakeFetcher({"10.1000/noabs": NO_ABSTRACT})
+    draft = ("Exercise improves sleep quality in older adults [1].\n\nReferences\n"
+             "[1] Doe. Paywalled paper. 2019. doi:10.1000/noabs\n")
+    a = agent(fetcher=fetcher, fulltext=FakeFullText({}))
+    c = a.check_draft(draft).to_dict()["citations"][0]
+    new = a.recheck_with_abstract(c, "Paywalled paper", "We found that exercise improves sleep quality in older adults.")
+    assert new["status"] == "checked" and new["abstract_pasted"] and new["verdict"]["label"] == SUPPORT
+    assert new["steps"][-2]["action"] == "abstract pasted" or any(s["action"] == "abstract pasted" for s in new["steps"])
+    assert "abstract pasted by the researcher" in to_markdown({"kind": "draft_check", "citations": [new]})
+
+
+def test_stub_paper():
+    from src.agent import stub_paper
+
+    s = stub_paper("10.1038/nature14539", "Found “Deep learning” but no abstract is available")
+    assert s.title == "Deep learning" and s.doi == "10.1038/nature14539" and s.paper_id == "doi:10.1038/nature14539"
+    a = stub_paper("arXiv:1706.03762")
+    assert a.paper_id == "arxiv:1706.03762" and a.url.endswith("1706.03762")
