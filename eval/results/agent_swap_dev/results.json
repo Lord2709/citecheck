@@ -1,0 +1,92 @@
+{
+  "name": "agent_swap_dev",
+  "experiment": "E3 swap test",
+  "split": "dev",
+  "verifier": "nli:MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
+  "synthetic_fixture": false,
+  "partial": false,
+  "data_sha256": "86f0435d08fdb65d",
+  "args": {
+    "cmd": "swap",
+    "name": "agent_swap_dev",
+    "data_dir": "data/scifact",
+    "split": "dev",
+    "verifier": "nli",
+    "tau": null,
+    "tau_strict": null,
+    "n": null,
+    "seed": 0,
+    "out": "eval/results"
+  },
+  "metrics": {
+    "n_claims": 124,
+    "flagged_rate": {
+      "k": 113,
+      "n": 124,
+      "rate": 0.9113,
+      "ci95": [
+        0.8481,
+        0.9497
+      ]
+    },
+    "false_keep_rate": {
+      "k": 11,
+      "n": 124,
+      "rate": 0.0887,
+      "ci95": [
+        0.0503,
+        0.1519
+      ]
+    },
+    "suggestion_rate": {
+      "k": 54,
+      "n": 124,
+      "rate": 0.4355,
+      "ci95": [
+        0.3515,
+        0.5234
+      ]
+    },
+    "recovered_gold_rate": {
+      "k": 50,
+      "n": 124,
+      "rate": 0.4032,
+      "ci95": [
+        0.321,
+        0.4912
+      ]
+    },
+    "suggestion_gold_rate": {
+      "k": 50,
+      "n": 57,
+      "rate": 0.8772,
+      "ci95": [
+        0.7675,
+        0.9392
+      ]
+    },
+    "bad_replacement_upper": {
+      "k": 7,
+      "n": 57,
+      "rate": 0.1228,
+      "ci95": [
+        0.0608,
+        0.2325
+      ]
+    },
+    "control_kept_rate": {
+      "k": 64,
+      "n": 124,
+      "rate": 0.5161,
+      "ci95": [
+        0.429,
+        0.6023
+      ]
+    },
+    "tau": 0.6,
+    "tau_strict": 0.85,
+    "max_candidates": 5
+  },
+  "seconds": 339.0,
+  "created_at": "2026-10-23T12:56:46-04:00"
+}

@@ -1,0 +1,33 @@
+{
+  "judgements": {
+    "y": 10,
+    "n": 7,
+    "unsure": 1,
+    "blank": 0
+  },
+  "by_kind": {
+    "non_gold_suggestion": {
+      "y": 4,
+      "n": 2,
+      "unsure": 1,
+      "blank": 0
+    },
+    "wrong_citation_kept": {
+      "y": 6,
+      "n": 5,
+      "unsure": 0,
+      "blank": 0
+    }
+  },
+  "bad_replacement_after_review": {
+    "k": 3,
+    "n": 57,
+    "rate": 0.0526
+  },
+  "false_keep_after_review": {
+    "k": 5,
+    "n": 124,
+    "rate": 0.0403
+  },
+  "rule": "rows judged 'y' (the paper does support the claim) are not counted as errors; 'n', 'unsure' and blank are"
+}
