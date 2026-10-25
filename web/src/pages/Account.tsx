@@ -35,7 +35,7 @@ export default function Account() {
       {me?.is_admin && (
         <section className="card">
           <h2>Research export</h2>
-          <p className="muted small">For the team: usage, outcomes and feedback from people who agreed to research use, with anonymised ids and no free text. Review it before committing anything to the repo.</p>
+          <p className="muted small">Usage, outcomes and feedback from people who agreed to research use, with anonymised ids and no free text. Only admins see this.</p>
           <button className="btn" onClick={exportData}>Download the export (JSON)</button>
           {exportMsg && <p className="muted small">{exportMsg}</p>}
         </section>

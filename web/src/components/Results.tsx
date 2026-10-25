@@ -28,12 +28,12 @@ export default function Results({ citations, summary, warnings = [], runId, done
 
   return (
     <section className="results" aria-live="polite">
-      <div className="summary-row">
+      <div className="summary-row" role="group" aria-label="Filter by outcome">
         {FILTERS.map((f) => (
-          <button key={f.key} className={`stat ${f.cls} ${filter === f.key ? "active" : ""}`}
+          <button key={f.key} className={`stat ${f.cls} ${filter === f.key ? "active" : ""}`} aria-pressed={filter === f.key}
                   onClick={() => { setFilter(f.key); track("filter", { filter: f.key }); }}>
-            <span className="stat-n">{f.field ? (summary[f.field] as number) : 0}</span>
             <span className="stat-l">{f.label}</span>
+            <span className="stat-n">{f.field ? (summary[f.field] as number) : 0}</span>
           </button>
         ))}
       </div>

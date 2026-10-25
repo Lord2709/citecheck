@@ -20,6 +20,12 @@ export function conf(x: number | null | undefined): string {
   return x >= 0.995 ? "≥ 0.99" : x.toFixed(2);
 }
 
+// Only follow ?next= to a path on this site: "/check" yes; "//evil.example", "/\\evil.example" or "https://..." no.
+export function safeNext(next: string | null, fallback = "/check"): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.includes("\\") || /[\u0000-\u001f]/.test(next)) return fallback;
+  return next;
+}
+
 export function when(iso: string): string {
   try {
     return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });

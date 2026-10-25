@@ -28,8 +28,8 @@ feedback of consenting users, with salted-hash ids and no free text. Review an e
 
 ## 1. Supabase (once, about 15 minutes)
 
-1. Create a free project at supabase.com. Note the **Project URL** and the **anon public key**
-   (Project Settings → API).
+1. Create a free project at supabase.com. Note the **Project URL** (Project Settings → Data API) and the
+   **publishable key** (Project Settings → API Keys).
 2. **Authentication → Providers → Email**: enabled (the default).
 3. **Authentication → Email Templates**: in **Magic Link** *and* **Confirm signup**, make the e-mail show the code, e.g.
    `<p>Your CiteCheck code is <strong>{{ .Token }}</strong>. It expires in 1 hour.</p>`
@@ -50,7 +50,7 @@ Create a Space (SDK **Docker**, blank, hardware **CPU basic**). In **Settings �
 | Name | Kind | Value |
 |---|---|---|
 | `SUPABASE_URL` | variable | Project URL |
-| `SUPABASE_ANON_KEY` | variable | anon public key (it is public by design) |
+| `SUPABASE_PUBLISHABLE_KEY` | variable | publishable key `sb_publishable_...` (public by design; the legacy anon key also works as `SUPABASE_ANON_KEY`) |
 | `DATABASE_URL` | **secret** | `postgresql+psycopg://...` session-pooler URI with the password |
 | `CITECHECK_ADMIN_EMAILS` | secret | team e-mails allowed to download the research export, comma-separated |
 | `CITECHECK_EXPORT_SALT` | secret | any long random string |
@@ -88,7 +88,7 @@ uvicorn --factory api.main:create_app --reload --port 8000
 cd web; npm ci; npm run dev                      # http://localhost:5173 (forwards /api to :8000)
 ```
 
-To test real sign-in locally, set `SUPABASE_URL` and `SUPABASE_ANON_KEY` instead of `CITECHECK_AUTH=off`.
+To test real sign-in locally, set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` instead of `CITECHECK_AUTH=off`.
 
 ## Security notes
 

@@ -2,7 +2,7 @@ export default function About() {
   return (
     <div className="page narrow prose">
       <h1>How CiteCheck works</h1>
-      <p className="lead">CiteCheck is a course project at the University of Maryland (DATA/MSML 641, Natural Language Processing).</p>
+      <p className="lead">CiteCheck checks whether the papers you cite support the sentences you cite them for, and shows you the lines that decide it.</p>
 
       <h2>What happens when you check a draft</h2>
       <ol>
@@ -20,7 +20,7 @@ export default function About() {
       <h2>Your data</h2>
       <ul>
         <li>We keep your account (e-mail) so you can sign in and see your history.</li>
-        <li>With your permission, we record how you use the site and your feedback, for our course research. Published results are anonymised.</li>
+        <li>With your permission, we record how you use the site and your feedback, to study where CiteCheck goes wrong and improve it. Anything we publish about it is anonymised.</li>
         <li>The text you paste is stored only if you allow it, with e-mail addresses and phone numbers masked.</li>
         <li>You can change these choices any time in Account.</li>
       </ul>

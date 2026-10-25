@@ -11,6 +11,8 @@ interface Props {
   defaultOpen?: boolean;
 }
 
+const sentenceCase = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+
 function Sentence({ text, marker }: { text: string; marker: string }) {
   if (!marker || !text.includes(marker)) return <>{text}</>;
   const i = text.indexOf(marker);
@@ -111,7 +113,7 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
           ) : (
             <div className="field">
               <div className="field-label">Why we couldn't check it</div>
-              <p>{c.status_detail || "We could not find this paper."}</p>
+              <p>{sentenceCase(c.status_detail) || "We could not find this paper."}</p>
             </div>
           )}
 

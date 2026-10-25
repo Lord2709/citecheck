@@ -2,6 +2,16 @@ import { useState, type ReactNode } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth";
 
+function Mark() {
+  return (
+    <span className="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M5 12.5l4.5 4.5L19 7.5" stroke="#f3cd45" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
 export default function Layout({ children }: { children: ReactNode }) {
   const { signedIn, me, devMode, signOut, configError } = useAuth();
   const [open, setOpen] = useState(false);
@@ -13,7 +23,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <header className="topbar">
         <div className="topbar-inner">
           <Link to="/" className="brand" onClick={close}>
-            <span className="brand-mark" aria-hidden="true">✓</span>
+            <Mark />
             <span>CiteCheck</span>
           </Link>
           <button className="menu-btn" aria-label="Menu" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -31,7 +41,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                     {devMode ? "Dev mode" : me?.email?.split("@")[0] || "Account"}
                   </NavLink>
                   {!devMode && (
-                    <button className="link-btn" onClick={async () => { close(); await signOut(); nav("/"); }}>
+                    <button className="quiet-btn" onClick={async () => { close(); await signOut(); nav("/"); }}>
                       Sign out
                     </button>
                   )}
@@ -47,8 +57,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       <main>{children}</main>
       <footer className="footer">
         <div className="footer-inner">
-          <span>CiteCheck · a UMD DATA/MSML 641 course project</span>
-          <span>A second pair of eyes, not proof. Always read the evidence before you cite.</span>
+          <span>CiteCheck</span>
+          <span>Read the evidence before you cite.</span>
         </div>
       </footer>
     </div>

@@ -133,19 +133,19 @@ def test_discover_claim_feedback_events_and_export(tmp_path, fixture_dir):
 
 def test_supabase_mode_requires_a_valid_token(tmp_path, fixture_dir):
     s = Settings(auth_mode="supabase", supabase_url="https://x.supabase.co", supabase_anon_key="anon",
-                 admin_emails=["boss@umd.edu"])
+                 admin_emails=["boss@example.org"])
     calls = []
 
     def lookup(token):
         calls.append(token)
         if token != "good":
             raise AuthError("your session has expired; please sign in again")
-        return User("u-1", "member@umd.edu")
+        return User("u-1", "member@example.org")
     c, _ = client(tmp_path, fixture_dir, settings=s, verifier=TokenVerifier(s, lookup=lookup))
     assert c.get("/api/me").status_code == 401
     assert c.get("/api/me", headers={"Authorization": "Bearer bad"}).status_code == 401
     me = c.get("/api/me", headers={"Authorization": "Bearer good"}).json()
-    assert me["email"] == "member@umd.edu" and me["is_admin"] is False
+    assert me["email"] == "member@example.org" and me["is_admin"] is False
     c.get("/api/me", headers={"Authorization": "Bearer good"})
     assert calls.count("good") == 1                                       # cached
     assert c.get("/api/admin/export", headers={"Authorization": "Bearer good"}).status_code == 403
@@ -162,3 +162,15 @@ def test_site_fallback_when_not_built(tmp_path, fixture_dir, monkeypatch):
     (tmp_path / "nodist").mkdir()
     (tmp_path / "nodist" / "index.html").write_text("<html>site</html>")
     assert "site" in c.get("/check").text and "site" in c.get("/").text
+
+
+def test_publishable_key_setting(monkeypatch):
+    from api.settings import load_settings
+
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_abc")
+    s = load_settings()
+    assert s.auth_mode == "supabase" and s.supabase_anon_key == "sb_publishable_abc" and s.supabase_url.endswith(".co")
+    monkeypatch.delenv("SUPABASE_PUBLISHABLE_KEY")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "eyJlegacy")
+    assert load_settings().supabase_anon_key == "eyJlegacy"

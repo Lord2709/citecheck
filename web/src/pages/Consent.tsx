@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { post } from "../api";
 import { useAuth } from "../auth";
+import { safeNext } from "../format";
 
 export function ConsentForm({ onSaved, initial }: { onSaved: () => void; initial?: { research: boolean | null; text: boolean } }) {
   const [research, setResearch] = useState<boolean>(initial?.research ?? false);
@@ -23,7 +24,7 @@ export function ConsentForm({ onSaved, initial }: { onSaved: () => void; initial
         <input type="checkbox" checked={research} onChange={(e) => setResearch(e.target.checked)} />
         <span>
           <strong>Help us improve CiteCheck</strong>
-          <span className="muted">Keep a record of how you use the site (pages, checks, your 👍/👎) for our course research. Anything we publish is anonymised.</span>
+          <span className="muted">Keep a record of how you use the site: pages, checks and your 👍/👎. Anything we publish about it is anonymised.</span>
         </span>
       </label>
       <label className={`choice ${research ? "" : "disabled"}`}>
@@ -33,7 +34,7 @@ export function ConsentForm({ onSaved, initial }: { onSaved: () => void; initial
           <span className="muted">Lets us study where CiteCheck gets it wrong. E-mail addresses and phone numbers are masked. Off by default.</span>
         </span>
       </label>
-      <p className="muted small">Either way, your checks are saved to your own History, and you can change these choices any time in Account.</p>
+      <p className="muted small">Either way, your checks are saved to your own History, which only you can see.</p>
       <button className="btn btn-primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Continue"}</button>
     </div>
   );
@@ -42,12 +43,12 @@ export function ConsentForm({ onSaved, initial }: { onSaved: () => void; initial
 export default function Consent() {
   const nav = useNavigate();
   const [params] = useSearchParams();
-  const next = params.get("next") || "/check";
+  const next = safeNext(params.get("next"));
   return (
     <div className="page narrow">
       <section className="card">
         <h1>Welcome to CiteCheck</h1>
-        <p className="lead small">CiteCheck is a student research project. Before you start, choose what we may keep.</p>
+        <p className="lead small">Before you start, choose what we may keep. You can change this any time in Account.</p>
         <ConsentForm onSaved={() => nav(next === "/welcome" ? "/check" : next, { replace: true })} />
       </section>
     </div>
