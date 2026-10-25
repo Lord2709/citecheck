@@ -2,7 +2,8 @@
 
   CITECHECK_AUTH           supabase (default when SUPABASE_URL is set) | off (local development and tests only)
   SUPABASE_URL             https://<project>.supabase.co
-  SUPABASE_ANON_KEY        the project's public anon key (safe to expose; the frontend needs it too)
+  SUPABASE_PUBLISHABLE_KEY the project's publishable key (sb_publishable_...; public by design, the browser uses it).
+                           SUPABASE_ANON_KEY (the legacy anon key) is still accepted.
   DATABASE_URL             postgresql+psycopg://...  (Supabase connection string); default: a local SQLite file
   CITECHECK_DB_SCHEMA      Postgres schema for our tables (default "citecheck": NOT exposed by Supabase's REST API)
   CITECHECK_ADMIN_EMAILS   comma-separated e-mails allowed to download the anonymised research export
@@ -40,7 +41,7 @@ class Settings:
 def load_settings() -> Settings:
     s = Settings()
     s.supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-    s.supabase_anon_key = os.environ.get("SUPABASE_ANON_KEY", "")
+    s.supabase_anon_key = os.environ.get("SUPABASE_PUBLISHABLE_KEY") or os.environ.get("SUPABASE_ANON_KEY", "")
     s.auth_mode = os.environ.get("CITECHECK_AUTH", "supabase" if s.supabase_url else "off").lower()
     s.database_url = os.environ.get("DATABASE_URL", s.database_url)
     s.db_schema = os.environ.get("CITECHECK_DB_SCHEMA", s.db_schema)
@@ -48,7 +49,7 @@ def load_settings() -> Settings:
     s.origins = _list("CITECHECK_ORIGINS")
     s.export_salt = os.environ.get("CITECHECK_EXPORT_SALT", s.export_salt)
     if s.auth_mode == "supabase" and not (s.supabase_url and s.supabase_anon_key):
-        raise RuntimeError("CITECHECK_AUTH=supabase needs SUPABASE_URL and SUPABASE_ANON_KEY")
+        raise RuntimeError("CITECHECK_AUTH=supabase needs SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY")
     if s.auth_mode not in ("supabase", "off"):
         raise RuntimeError("CITECHECK_AUTH must be 'supabase' or 'off'")
     return s

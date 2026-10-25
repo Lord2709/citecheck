@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth";
+import { safeNext } from "../format";
 
 export default function SignIn() {
   const { signedIn, sendCode, verifyCode, ready } = useAuth();
   const [params] = useSearchParams();
-  const next = params.get("next") || "/check";
+  const next = safeNext(params.get("next"));
   const [email, setEmail] = useState("");
   const [step, setStep] = useState<"email" | "code">("email");
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
@@ -77,7 +78,7 @@ export default function SignIn() {
             <p className="lead small">We'll e-mail you a 6-digit code. No password needed.</p>
             <label className="field-label" htmlFor="email">E-mail</label>
             <input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                   onKeyDown={(e) => e.key === "Enter" && send()} placeholder="you@university.edu" />
+                   onKeyDown={(e) => e.key === "Enter" && send()} placeholder="name@example.com" />
             {error && <p className="error" role="alert">{error}</p>}
             <button className="btn btn-primary wide" onClick={send} disabled={busy}>{busy ? "Sending…" : "Send me a code"}</button>
           </>

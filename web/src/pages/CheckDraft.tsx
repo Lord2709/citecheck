@@ -113,7 +113,7 @@ export default function CheckDraft() {
                       placeholder={"…reduces infection rates in adults [1].\n\nReferences\n[1] Author et al. Title. Venue 2020. doi:10.…"} />
             <div className="composer-meta">
               <button className="link-btn" onClick={() => { setText(EXAMPLE); track("example_loaded", {}); }}>Try an example with real papers</button>
-              <span className="muted small">{text.length.toLocaleString()} characters · citations like [1], [2–4] or (Smith et al., 2020)</span>
+              <span className="muted small">Citations like [1], [2–4] or (Smith et al., 2020).{text ? ` ${text.length.toLocaleString()} characters.` : ""}</span>
             </div>
           </>
         ) : (
@@ -138,7 +138,7 @@ export default function CheckDraft() {
         {info && (
           <div className="banner">
             {info}
-            {info.includes("Find papers") && <button className="link-btn" onClick={() => nav("/papers")}> Go to Find papers →</button>}
+            {info.includes("Find papers") && <button className="link-btn" onClick={() => nav("/papers")}>Go to Find papers</button>}
           </div>
         )}
 
