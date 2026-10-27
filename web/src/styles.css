@@ -172,7 +172,7 @@ select { width: auto; padding: 0.35rem 0.5rem; margin: 0 0.4rem; }
 .chev.up { transform: rotate(180deg); }
 .cite-body { padding: 1.1rem 1.1rem 1rem; display: flex; flex-direction: column; gap: 1.1rem; border-top: 1px solid var(--line); }
 .field p { margin: 0; }
-.field-label { font-size: 0.8125rem; font-weight: 600; color: var(--muted); margin-bottom: 0.3rem; }
+.field-label { display: block; font-size: 0.8125rem; font-weight: 600; color: var(--muted); margin-bottom: 0.3rem; }
 .quote-plain { font-family: var(--f-display); font-size: 1.05rem; line-height: 1.6; color: var(--ink); }
 mark.marker { background: var(--marker-bg); color: var(--ink); padding: 0.02em 0.22em; border-radius: 3px; }
 blockquote.evidence { margin: 0.4rem 0 0; padding: 0.05rem 0 0.05rem 0.9rem; border-left: 3px solid var(--highlight); font-family: var(--f-display); font-size: 1.02rem; line-height: 1.6; color: var(--ink); }
@@ -211,8 +211,8 @@ blockquote.evidence.small { font-size: 0.97rem; }
 /* sign-in and consent */
 .auth h1 { margin-bottom: 0.35rem; }
 .auth .field-label { margin-top: 1.25rem; }
-.otp { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.5rem; margin: 1.25rem 0 1rem; }
-.otp input { text-align: center; font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; padding: 0.6rem 0; }
+input.otp-input { text-align: center; font-size: 1.6rem; font-weight: 600; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; padding: 0.6rem 0.5rem; margin-bottom: 0.35rem; }
+.auth-links { margin-top: 0.9rem; }
 .consent { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.25rem; }
 .choice { display: flex; gap: 0.75rem; align-items: flex-start; padding: 0.9rem 1rem; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .choice:has(input:checked) { border-color: var(--line-strong); background: var(--surface-2); }

@@ -14,7 +14,7 @@ WORKDIR /home/user/app
 
 # CPU-only PyTorch first (much smaller than the default CUDA build), then everything else.
 COPY --chown=user requirements.txt .
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1 \
+RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0 \
  && pip install -r requirements.txt
 
 COPY --chown=user . .
