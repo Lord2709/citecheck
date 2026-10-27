@@ -1,5 +1,5 @@
 # CiteCheck website: React frontend + FastAPI backend + the evaluated model, in one container.
-# Hugging Face Spaces (Docker SDK, free "CPU basic") or any Docker host.  Owner: Engineering.  Steps: deploy/WEB.md.
+# Google Cloud Run (deploy/GCP.md), a Hugging Face Docker Space or any Docker host.  Owner: Engineering.  Setup: deploy/WEB.md.
 
 # ---- stage 1: build the React site ----
 FROM node:20-slim AS web
@@ -20,7 +20,8 @@ ENV HOME=/home/user \
 WORKDIR /home/user/app
 
 COPY --chown=user requirements.txt .
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1 \
+# CPU-only PyTorch first (the same version requirements.txt pins), then everything else.
+RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0 \
  && pip install -r requirements.txt
 
 COPY --chown=user . .

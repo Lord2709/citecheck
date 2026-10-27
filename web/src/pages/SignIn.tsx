@@ -3,17 +3,21 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth";
 import { safeNext } from "../format";
 
+// Supabase sends codes of 6 to 10 digits (Authentication → Email → "Email OTP Length"); accept any of them.
+const MIN_CODE = 6;
+const MAX_CODE = 10;
+
 export default function SignIn() {
   const { signedIn, sendCode, verifyCode, ready } = useAuth();
   const [params] = useSearchParams();
   const next = safeNext(params.get("next"));
   const [email, setEmail] = useState("");
   const [step, setStep] = useState<"email" | "code">("email");
-  const [digits, setDigits] = useState(["", "", "", "", "", ""]);
+  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [wait, setWait] = useState(0);
-  const boxes = useRef<(HTMLInputElement | null)[]>([]);
+  const codeBox = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (wait <= 0) return;
@@ -30,8 +34,9 @@ export default function SignIn() {
     try {
       await sendCode(email.trim().toLowerCase());
       setStep("code");
+      setCode("");
       setWait(60);
-      window.setTimeout(() => boxes.current[0]?.focus(), 50);
+      window.setTimeout(() => codeBox.current?.focus(), 50);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -39,35 +44,22 @@ export default function SignIn() {
     }
   }
 
-  async function verify(code: string) {
+  async function verify(value: string) {
+    if (value.length < MIN_CODE) return setError(`Enter the full code from the e-mail (at least ${MIN_CODE} digits).`);
     setError("");
     setBusy(true);
     try {
-      await verifyCode(email.trim().toLowerCase(), code);
+      await verifyCode(email.trim().toLowerCase(), value);
     } catch (e) {
       setError((e as Error).message);
-      setDigits(["", "", "", "", "", ""]);
-      boxes.current[0]?.focus();
+      setCode("");
+      window.setTimeout(() => codeBox.current?.focus(), 50);
     } finally {
       setBusy(false);
     }
   }
 
-  function setDigit(i: number, v: string) {
-    const clean = v.replace(/\D/g, "");
-    if (clean.length > 1) {                                  // pasted the whole code
-      const all = clean.slice(0, 6).split("");
-      const d = [...all, ...Array(6 - all.length).fill("")];
-      setDigits(d);
-      if (all.length === 6) verify(all.join(""));
-      return;
-    }
-    const d = [...digits];
-    d[i] = clean;
-    setDigits(d);
-    if (clean && i < 5) boxes.current[i + 1]?.focus();
-    if (d.every((x) => x)) verify(d.join(""));
-  }
+  const digitsOnly = (v: string) => v.replace(/\D/g, "").slice(0, MAX_CODE);
 
   return (
     <div className="page narrow">
@@ -75,7 +67,7 @@ export default function SignIn() {
         <h1>Sign in</h1>
         {step === "email" ? (
           <>
-            <p className="lead small">We'll e-mail you a 6-digit code. No password needed.</p>
+            <p className="lead small">We'll e-mail you a sign-in code. No password needed.</p>
             <label className="field-label" htmlFor="email">E-mail</label>
             <input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)}
                    onKeyDown={(e) => e.key === "Enter" && send()} placeholder="name@example.com" />
@@ -84,18 +76,25 @@ export default function SignIn() {
           </>
         ) : (
           <>
-            <p className="lead small">Enter the 6-digit code we sent to <strong>{email}</strong>. It may take a minute; check your spam folder too.</p>
-            <div className="otp" onPaste={(e) => { e.preventDefault(); setDigit(0, e.clipboardData.getData("text")); }}>
-              {digits.map((d, i) => (
-                <input key={i} ref={(el) => { boxes.current[i] = el; }} inputMode="numeric" autoComplete={i === 0 ? "one-time-code" : "off"}
-                       maxLength={6} value={d} aria-label={`Digit ${i + 1}`} disabled={busy}
-                       onChange={(e) => setDigit(i, e.target.value)}
-                       onKeyDown={(e) => { if (e.key === "Backspace" && !digits[i] && i > 0) boxes.current[i - 1]?.focus(); }} />
-              ))}
-            </div>
+            <p className="lead small">Enter the code we sent to <strong>{email}</strong>. It may take a minute; check your spam folder too.</p>
+            <label className="field-label" htmlFor="code">Code</label>
+            <input id="code" ref={codeBox} className="otp-input" inputMode="numeric" autoComplete="one-time-code"
+                   maxLength={MAX_CODE} value={code} disabled={busy} aria-describedby="code-help"
+                   onChange={(e) => setCode(digitsOnly(e.target.value))}
+                   onPaste={(e) => {
+                     e.preventDefault();
+                     const pasted = digitsOnly(e.clipboardData.getData("text"));
+                     setCode(pasted);
+                     if (pasted.length >= MIN_CODE) verify(pasted);
+                   }}
+                   onKeyDown={(e) => e.key === "Enter" && verify(code)} />
+            <span id="code-help" className="muted small">Digits only. Pasting the code signs you in straight away.</span>
             {error && <p className="error" role="alert">{error}</p>}
-            <div className="row">
-              <button className="link-btn" onClick={() => { setStep("email"); setError(""); }}>Use a different e-mail</button>
+            <button className="btn btn-primary wide" onClick={() => verify(code)} disabled={busy || code.length < MIN_CODE}>
+              {busy ? "Signing in…" : "Sign in"}
+            </button>
+            <div className="row auth-links">
+              <button className="link-btn" onClick={() => { setStep("email"); setError(""); setCode(""); }}>Use a different e-mail</button>
               <button className="link-btn" onClick={send} disabled={wait > 0 || busy}>{wait > 0 ? `Resend in ${wait}s` : "Resend the code"}</button>
             </div>
           </>

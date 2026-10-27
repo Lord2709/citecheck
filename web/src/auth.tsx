@@ -1,4 +1,4 @@
-// Sign-in with an e-mailed 6-digit code (Supabase Auth), and the current user's profile from our API.
+// Sign-in with an e-mailed one-time code (Supabase Auth; 6 to 10 digits, set in Supabase), and the current user's profile from our API.
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { get, setTokenGetter } from "./api";

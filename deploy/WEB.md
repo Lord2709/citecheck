@@ -1,16 +1,18 @@
 # The CiteCheck website (React + FastAPI + Supabase)
 
-Owner: Engineering.  Everything here is free tier.
+Owner: Engineering.  Everything here runs at no cost: Supabase free plan, a Gmail sender, and Google Cloud Run on the
+free trial (`deploy/GCP.md`).
 
 ```
 browser ── React site (web/) ──► FastAPI (api/) ──► the agent and the evaluated verifier (src/)
    │                                   │
-   └── sign-in: e-mailed 6-digit code  └── Postgres: users, checks, feedback, activity (schema "citecheck")
+   └── sign-in: e-mailed one-time code └── Postgres: users, checks, feedback, activity (schema "citecheck")
             (Supabase Auth)                    (Supabase database)
 ```
 
-One Docker container on a Hugging Face Space serves the site and the API, so there is a single URL and no CORS setup.
-The model needs more memory than Render's free web services offer, so Render would only suit the frontend.
+One Docker container serves the site and the API, so there is a single URL and no CORS setup. It runs on Google Cloud
+Run (`deploy/GCP.md`). Hugging Face Docker Spaces need a paid plan since 2026, and free web services such as Render's
+offer 512 MB of memory while the site needs about 2 GB (PyTorch plus the verifier), so neither is used.
 
 ## What is stored, and why
 
@@ -33,19 +35,25 @@ feedback of consenting users, with salted-hash ids and no free text. Review an e
 2. **Authentication → Providers → Email**: enabled (the default).
 3. **Authentication → Email Templates**: in **Magic Link** *and* **Confirm signup**, make the e-mail show the code, e.g.
    `<p>Your CiteCheck code is <strong>{{ .Token }}</strong>. It expires in 1 hour.</p>`
-   (without `{{ .Token }}` Supabase sends a link instead of a 6-digit code).
-4. **Authentication → URL Configuration**: Site URL = your Space URL (`https://<hf-user>-citecheck.hf.space`).
+   (without `{{ .Token }}` Supabase sends a link instead of a code). Under **Authentication → Email**, set
+   **Email OTP Length** to 6; the sign-in page accepts 6 to 10 digits either way.
+4. **Authentication → URL Configuration**: Site URL = the live site's URL (today
+   `https://citecheck-877770798089.us-east4.run.app`); add it and `http://localhost:8000` under **Redirect URLs**.
 5. **Custom SMTP (strongly recommended before user tests)**: Supabase's built-in mailer allows only a few e-mails per
    hour on the free plan. Project Settings → Authentication → SMTP: use a free sender (e.g. Resend, Brevo, or a Gmail
    app password).
 6. **Database connection string**: Connect → **Session pooler** URI (works over IPv4; the direct connection is
-   IPv6-only). Change the start from `postgresql://` to `postgresql+psycopg://`. The API creates its tables in a
-   `citecheck` schema on first start; Supabase's public REST API does not expose that schema, so the anon key in the
-   browser cannot read them.
+   IPv6-only). Change the start from `postgresql://` to `postgresql+psycopg://`, and put the database password in place
+   of `[YOUR-PASSWORD]` **without the square brackets**. Use a password of letters and digits: `@ : / ? # %` break the
+   address unless written as `%40 %3A %2F %3F %23 %25`. The API creates its tables in a
+   `citecheck` schema on first start; Supabase's public REST API does not expose that schema, so the publishable key in
+   the browser cannot read them.
 
-## 2. Hugging Face Space
+## 2. Hosting
 
-Create a Space (SDK **Docker**, blank, hardware **CPU basic**). In **Settings → Variables and secrets**:
+**Google Cloud Run (what the live site uses):** follow `deploy/GCP.md`.
+
+**Alternative, Hugging Face Space** (needs HF PRO, $9/month, since 2026). Create a Space (SDK **Docker**, blank, hardware **CPU basic**). In **Settings → Variables and secrets**:
 
 | Name | Kind | Value |
 |---|---|---|
@@ -96,4 +104,4 @@ To test real sign-in locally, set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` 
   Supabase on the server (cached 5 minutes).
 - Rate limits per user: draft checks 6/min, searches 20/min. Inputs are capped (60,000 characters; 15 MB PDFs).
 - People only ever see their own history (`runs` are filtered by user id on the server).
-- Secrets live in Space secrets, never in the repo. The anon key is public by design.
+- Secrets live in Space secrets, never in the repo. The publishable key and the project URL are public by design.
