@@ -12,6 +12,10 @@ calibration part stays unseen for temperature scaling and threshold tuning):
   * NEI       : for claims with no evidence, the best sentences of the papers the claim cited -> neutral
   * hard negatives: papers OUR retriever ranks high that are not gold -> neutral (teaches the model to
                     abstain on plausible-looking but irrelevant papers, exactly what happens at inference)
+  * --selected-positives (off by default): ALSO add, for each SUPPORT/CONTRADICT gold paper, the premise our
+                    lexical selector would build at inference (top-m sentences), labelled with the paper's label,
+                    but only when it contains at least one gold rationale sentence.  This closes the gap between
+                    training premises (gold rationales) and inference premises (selected sentences).
 
 Runs on CPU (slow: budget ~15-30 min/epoch for a base model) or a free Colab GPU.  Model weights go to
 models/ which is git-ignored: do NOT commit them (record the run in eval/results instead).
@@ -19,8 +23,10 @@ models/ which is git-ignored: do NOT commit them (record the run in eval/results
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
+import subprocess
 import time
 from pathlib import Path
 
@@ -32,7 +38,7 @@ from src.retrieval import BM25Retriever
 from src.schema import NEI, SUPPORT
 
 
-def build_training_pairs(claims, corpus_by_id, retriever, scorer, m=3, neg_per_claim=1):
+def build_training_pairs(claims, corpus_by_id, retriever, scorer, m=3, neg_per_claim=1, selected_positives=False):
     """Returns list of (premise, claim, class) with class in {"support","neutral","contradict"}."""
     pairs = []
     for c in claims:
@@ -41,10 +47,20 @@ def build_training_pairs(claims, corpus_by_id, retriever, scorer, m=3, neg_per_c
             doc = corpus_by_id.get(doc_id)
             if lab == MIXED or doc is None:
                 continue
+            cls = "support" if lab == SUPPORT else "contradict"
+            seen = set()
             for rset in c.rationale_sets(doc_id):
                 premise = " ".join(doc.sentences[i] for i in rset if i < len(doc.sentences))
-                if premise:
-                    pairs.append((premise, c.claim, "support" if lab == SUPPORT else "contradict"))
+                if premise and premise not in seen:
+                    seen.add(premise)
+                    pairs.append((premise, c.claim, cls))
+            if selected_positives and doc.sentences:
+                sel = select_sentences(c.claim, doc.sentences, m, scorer)
+                if set(sel) & set(c.rationale_sentence_idxs(doc_id)):   # selected text holds real evidence
+                    premise = build_premise(doc.sentences, sel)
+                    if premise not in seen:
+                        seen.add(premise)
+                        pairs.append((premise, c.claim, cls))
         if c.gold_label == NEI:
             for doc_id in c.cited_doc_ids:
                 doc = corpus_by_id.get(doc_id)
@@ -81,9 +97,38 @@ def prepare_pairs(a):
         print("WARNING: no --split-file, training on ALL of train; then tau must not be tuned on train claims.")
         info = {"which": "all of train (no split file)", "split_file": None, "part": None, "n_claims": len(claims)}
     pairs = build_training_pairs(claims, by_id, BM25Retriever(corpus), LexicalSentenceScorer.from_docs(corpus),
-                                 m=a.sentences, neg_per_claim=a.neg_per_claim)
+                                 m=a.sentences, neg_per_claim=a.neg_per_claim, selected_positives=a.selected_positives)
+    info["selected_positives"] = bool(a.selected_positives)
     counts = {k: sum(1 for p in pairs if p[2] == k) for k in ("support", "neutral", "contradict")}
     return pairs, counts, info, train_path
+
+
+def pairs_sha256(pairs) -> str:
+    """Order-sensitive hash of the exact training pairs, so two runs can prove they trained on the same data."""
+    h = hashlib.sha256()
+    for premise, claim, label in pairs:
+        h.update(json.dumps([premise, claim, label], ensure_ascii=False).encode("utf-8"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def run_provenance() -> dict:
+    """git commit (and whether the tree was dirty) plus library versions; never fails."""
+    out = {}
+    try:
+        out["git_commit"] = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+                                           timeout=10).stdout.strip() or None
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True,
+                               text=True, timeout=10).stdout.strip()
+        out["git_dirty"] = bool(dirty)
+    except Exception:  # noqa: BLE001  (no git, e.g. a zip upload to Colab)
+        out["git_commit"], out["git_dirty"] = None, None
+    for mod in ("torch", "transformers", "numpy"):
+        try:
+            out[mod] = __import__(mod).__version__
+        except Exception:  # noqa: BLE001
+            out[mod] = None
+    return out
 
 
 def export_pairs(pairs, path):
@@ -111,6 +156,8 @@ def main(argv=None):
     ap.add_argument("--split-file", default=None,
                     help="data/splits/scifact_train_v1.json from eval.train_split: train on its fit part only")
     ap.add_argument("--part", default="fit", choices=["fit", "calib"], help="which part of the split to train on (fit!)")
+    ap.add_argument("--selected-positives", action="store_true",
+                    help="also train on the premise our sentence selector builds for gold papers (see docstring)")
     ap.add_argument("--pairs-only", action="store_true", help="build the pairs, print counts, stop (no torch needed)")
     ap.add_argument("--export-pairs", default=None,
                     help="also write the pairs as JSONL (put it under data/cache/: it holds SciFact text, never commit it)")
@@ -118,12 +165,14 @@ def main(argv=None):
 
     random.seed(a.seed)
     pairs, counts, claims_info, train_path = prepare_pairs(a)
+    pairs_hash = pairs_sha256(pairs)
     print(f"{len(pairs)} training pairs from {claims_info['n_claims']} claims ({claims_info['which']}): {counts}")
+    print(f"pairs sha256: {pairs_hash[:16]}")
     if a.export_pairs:
         export_pairs(pairs, a.export_pairs)
         print(f"[written] {a.export_pairs}")
     if a.pairs_only:
-        return {"n_pairs": len(pairs), "class_counts": counts, **claims_info}
+        return {"n_pairs": len(pairs), "class_counts": counts, "pairs_sha256": pairs_hash, **claims_info}
 
     import numpy as np
     import torch
@@ -182,7 +231,9 @@ def main(argv=None):
     tok.save_pretrained(out)
     (out / "train_log.json").write_text(json.dumps({
         "base": a.base, "args": vars(a), "n_pairs": len(pairs), "class_counts": counts, "loss_log": log,
-        "train_file_sha256": sha256_file(train_path)[:16], "claims": claims_info, "seconds": time.time() - t0,
+        "train_file_sha256": sha256_file(train_path)[:16], "pairs_sha256": pairs_hash[:16], "claims": claims_info,
+        "steps": step, "seconds": time.time() - t0, "device": dev,
+        "gpu": torch.cuda.get_device_name(0) if dev == "cuda" else None, "provenance": run_provenance(),
         "note": "trained on claims_train.jsonl only; evaluate with eval.run_eval on dev",
     }, indent=2), encoding="utf-8")
     print(f"[saved] {out}")
