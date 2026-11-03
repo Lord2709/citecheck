@@ -146,6 +146,26 @@ def test_numbers_must_come_from_a_real_run(tmp_path):
     assert status(run_checks(none, 5, deadline=DEADLINE))["north_star value matches a real eval run"] == "FAIL"
 
 
+def test_agent_runs_without_claim_level_f1_are_skipped(tmp_path):
+    # eval/results/agent_swap_dev (the E3 swap test) has no claim-level macro-F1; it must not crash the check
+    e3 = {"name": "agent_swap_dev", "synthetic_fixture": False, "partial": False, "rates": {"flagged": 0.911}}
+    root = build(tmp_path, runs=[e3, run("zero_shot_nli")])
+    assert status(run_checks(root, 5, deadline=DEADLINE))["north_star value matches a real eval run"] == "PASS"
+
+
+def test_result_folders_without_eval_flags_are_skipped(tmp_path):
+    # eval/results/realcite_audit* (the real-citation audit) has neither the synthetic/partial flags nor claim-level F1
+    audit = {"name": "realcite_audit", "n_pairs": 80}
+    root = build(tmp_path, runs=[audit, run("zero_shot_nli")])
+    assert status(run_checks(root, 5, deadline=DEADLINE))["north_star value matches a real eval run"] == "PASS"
+
+
+def test_a_run_missing_its_flags_does_not_count_as_real(tmp_path):
+    unflagged = {"name": "unflagged", "claim_level": {"macro_f1": 0.58}}
+    root = build(tmp_path, runs=[unflagged])
+    assert status(run_checks(root, 5, deadline=DEADLINE))["north_star value matches a real eval run"] == "FAIL"
+
+
 def test_same_model_claim_needs_a_deployed_config(tmp_path):
     root = build(tmp_path, deployed=False)
     assert status(run_checks(root, 5, deadline=DEADLINE))["'same model as the product' is backed"] == "FAIL"
