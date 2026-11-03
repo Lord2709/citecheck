@@ -33,7 +33,8 @@ class Config:
     tau: float = 0.5
     margin: float = 0.0
     data_dir: str = "data/scifact"
-    citation_gate: bool = True  # skip citing "sentences" that are not claims (src/citation_gate.py); audit only
+    citation_gate: bool = False  # skip citing "sentences" that are not claims (src/citation_gate.py); audit only, experimental
+    audit_all_contexts: bool = False  # audit EVERY sentence citing a paper (may give PARTLY SUPPORTED); off = first only
     audit_tau: Optional[float] = None  # the audit's own abstain threshold, tuned by eval/run_realcite.py --tune-tau
     claim_extractor: Optional[str] = None  # local LLM for the citation audit (src/claim_extraction.py); audit-only, experimental
     validated: bool = False
@@ -83,6 +84,9 @@ def load_config(deployed_path: Path = DEPLOYED_PATH) -> Config:
     cfg.data_dir = _env("CITECHECK_DATA_DIR") or cfg.data_dir
     cfg.claim_extractor = _env("CITECHECK_CLAIM_EXTRACTOR") or (dep or {}).get("claim_extractor") or None
     gate = _env("CITECHECK_CITATION_GATE")
-    cfg.citation_gate = (gate.lower() not in ("0", "false", "off")) if gate else bool((dep or {}).get("citation_gate", True))
+    cfg.citation_gate = (gate.lower() not in ("0", "false", "off")) if gate else bool((dep or {}).get("citation_gate", False))
+    allc = _env("CITECHECK_AUDIT_ALL_CONTEXTS")
+    cfg.audit_all_contexts = ((allc.lower() not in ("0", "false", "off")) if allc
+                              else bool((dep or {}).get("audit_all_contexts", False)))
     cfg.audit_tau = _env("CITECHECK_AUDIT_TAU", float) or (dep or {}).get("audit_tau")
     return cfg

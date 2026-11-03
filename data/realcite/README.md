@@ -84,5 +84,7 @@ The set is split by cited paper into a **tune** half (20 papers, 40 pairs) and a
    `deployed_config.json`; with unreviewed labels it refuses unless `--allow-unreviewed`, which is recorded as
    `audit_labels_reviewed: false`.
 
+Everything in the audit beyond the Session 5 behaviour is **off by default** in the app: the gate (`CITECHECK_CITATION_GATE=on`), checking every citing sentence instead of the first (`CITECHECK_AUDIT_ALL_CONTEXTS=1`, which can give PARTLY SUPPORTED) and LLM claim extraction (`CITECHECK_CLAIM_EXTRACTOR=<model>`).
+
 Both depend on unreviewed AI drafts. When the labels are reviewed, re-run `run_realcite --tune-tau` and re-check the
 gate numbers before quoting them.

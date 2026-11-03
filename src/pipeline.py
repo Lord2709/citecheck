@@ -33,8 +33,9 @@ class CiteCheckPipeline:
         self.scorer = scorer or LexicalSentenceScorer()
         self.k, self.m, self.tau, self.margin = k, sentences_per_paper, tau, margin
         self.evidence_unit = evidence_unit
-        self.claim_extractor = None  # src/claims.ClaimExtractor; None = check whole citing sentences
-        self.citation_gate = True  # src/citation_gate: skip contexts that are not claims before verifying
+        self.claim_extractor = None  # src/claim_extraction.ClaimExtractor; None = check whole citing sentences
+        self.citation_gate = False  # src/citation_gate: skip contexts that are not claims before verifying (experimental)
+        self.audit_all_contexts = False  # check every citing sentence; False = only the first (the Session 5 behaviour)
         self.audit_tau = None  # abstain threshold for the citation audit; None = the claim checker's tau
         self.meta = meta or {}
         self.warnings = warnings or []
@@ -88,7 +89,9 @@ class CiteCheckPipeline:
 
     # ------------------------------------------------------------------------------------------
     def audit(self, references: Sequence, max_items: int = 10, progress: Optional[Callable] = None) -> list:
-        """Check each cited paper against EVERY sentence that cites it.  EXPERIMENTAL: see eval/run_realcite.py.
+        """Check each cited paper against the sentence that cites it.  By default: the first citing sentence, whole,
+        no gate (the Session 5 behaviour).  EXPERIMENTAL options (off by default; see eval/run_realcite.py):
+        audit_all_contexts checks EVERY citing sentence, citation_gate skips sentences that are not claims.
 
         With a claim extractor (src/claim_extraction.py) each citing sentence is first split into the claims it attributes to
         the cited paper; without one, the whole cleaned sentence is the claim (the Session 5 behaviour).
@@ -98,7 +101,7 @@ class CiteCheckPipeline:
         for i, ref in enumerate(refs):
             if not ref.cited.abstract.strip():
                 continue
-            for ctx in ref.all_contexts:
+            for ctx in (ref.all_contexts if self.audit_all_contexts else ref.all_contexts[:1]):
                 g = assess_context(ctx) if self.citation_gate else None
                 if g is not None and not g.usable:
                     gated.setdefault(i, []).append(ClaimCheck(ctx, "", status="not_a_claim", note=g.reason))
@@ -224,6 +227,7 @@ def build_pipeline(cfg: Optional[Config] = None, allow_fallback: bool = True) ->
     pipe = CiteCheckPipeline(verifier, retriever, scorer, cfg.k, cfg.sentences_per_paper, cfg.tau, cfg.margin, meta, warnings,
                              evidence_unit=cfg.evidence_unit)
     pipe.citation_gate, pipe.audit_tau = cfg.citation_gate, cfg.audit_tau
+    pipe.audit_all_contexts = cfg.audit_all_contexts
     meta["audit_tau"] = cfg.audit_tau
     if cfg.claim_extractor:  # loads lazily on the first audit; a failure falls back to whole sentences, with a warning
         from .claim_extraction import ClaimExtractor

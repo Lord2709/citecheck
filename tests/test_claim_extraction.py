@@ -81,6 +81,9 @@ def test_audit_checks_every_context_without_an_extractor():
     pipe = CiteCheckPipeline(ByClaim({"bone density": Probs(0.9, 0.05, 0.05)}), tau=0.5)
     ref = Reference(PAPER, context="Zorvex raises bone density [3].",
                     contexts=("Zorvex raises bone density [3].", "Zorvex is used in elderly patients [3]."))
+    row = pipe.audit([ref])[0]                                # default: first citing sentence only (Session 5)
+    assert len(row.claims) == 1 and row.verdict.label == SUPPORT
+    pipe.audit_all_contexts = True
     row = pipe.audit([ref])[0]
     assert len(row.claims) == 2 and row.verdict.label == PARTIAL and row.verdict.note == "1 of 2 claims supported"
     assert row.verdict.display_label == "PARTLY SUPPORTED"
@@ -133,6 +136,8 @@ def test_build_pipeline_attaches_extractor_from_env(monkeypatch, fixture_dir):
 
 def test_audit_gate_and_audit_tau(monkeypatch, fixture_dir):
     pipe = CiteCheckPipeline(ByClaim({"bone density": Probs(0.7, 0.2, 0.1)}), tau=0.5)
+    assert pipe.citation_gate is False                       # experimental: off by default
+    pipe.citation_gate = True
     method = Reference(PAPER, context="Cells were cultured as described previously [3].")
     real = Reference(PAPER, context="Zorvex raises bone density [3].")
     rows = pipe.audit([method, real])
@@ -153,6 +158,11 @@ def test_audit_gate_and_audit_tau(monkeypatch, fixture_dir):
     monkeypatch.setenv("CITECHECK_CITATION_GATE", "off")
     p = build_pipeline()
     assert p.audit_tau == 0.75 and p.citation_gate is False and load_config().audit_tau == 0.75
+    assert p.audit_all_contexts is False
+    monkeypatch.setenv("CITECHECK_CITATION_GATE", "on")
+    monkeypatch.setenv("CITECHECK_AUDIT_ALL_CONTEXTS", "1")
+    p = build_pipeline()
+    assert p.citation_gate is True and p.audit_all_contexts is True
 
 
 def test_grounding_tolerates_pdf_extraction_artifacts():
