@@ -2,19 +2,37 @@
 
     python -m eval.train_split                                    # once: makes data/splits/scifact_train_v1.json
     python -m eval.finetune_nli --split-file data/splits/scifact_train_v1.json --pairs-only   # check the pairs, no torch
-    python -m eval.finetune_nli --split-file data/splits/scifact_train_v1.json --out models/citecheck-nli-ft --epochs 2 --lr 1e-5 --batch-size 8
+    python -m eval.finetune_nli --split-file data/splits/scifact_train_v1.json --out models/citecheck-nli-ft --epochs 3 --lr 1e-5 --batch-size 8
     python -m eval.run_eval --name finetuned_nli --retriever bm25 --verifier nli --model models/citecheck-nli-ft \\
         --oracle --compare-with eval/results/zero_shot_nli
 
 What it trains on (train split only; dev/test are never read; with --split-file, only the FIT part of train, so the
 calibration part stays unseen for temperature scaling and threshold tuning):
   * positives : gold rationale sentences of each evidence paper -> SUPPORT / CONTRADICT
+  * inference-style positives (--match-inference, on by default): the top-m sentences our own sentence
+                selector picks from the gold paper, when they include a rationale sentence.  At inference the
+                verifier sees selector output, not gold rationales, so it should be trained on that too.
   * NEI       : for claims with no evidence, the best sentences of the papers the claim cited -> neutral
   * hard negatives: papers OUR retriever ranks high that are not gold -> neutral (teaches the model to
                     abstain on plausible-looking but irrelevant papers, exactly what happens at inference)
+  * (optional, --gold-doc-neutral N) the N non-rationale sentence windows of a gold paper that look most
+                like the claim -> neutral
 
-Runs on CPU (slow: budget ~15-30 min/epoch for a base model) or a free Colab GPU.  Model weights go to
-models/ which is git-ignored: do NOT commit them (record the run in eval/results instead).
+Evidence units (--unit; evaluate with the same run_eval --evidence-unit):
+  * window   : the pairs above; the verifier reads the top-m selected sentences joined (Session 5 design)
+  * abstract : the verifier reads the whole abstract; no sentence selection (build_abstract_pairs)
+  * sentence : the verifier reads one sentence at a time and the paper takes its most decisive sentence
+               (build_sentence_pairs; aggregation in src/evidence.aggregate_sentence_probs)
+
+Held-out claims: with --split-file (recommended; eval/train_split.py) the model trains on the fit part and the
+calib part is held out, which is where run_eval --tune-split-file ... --tune-part calib tunes tau.  Without it, the
+train claims eval.run_eval tunes tau on by default (run_eval.tau_tuning_claims, same --tune-n and --seed) are LEFT
+OUT of training.  They are used for per-epoch validation and the best epoch is kept, and
+run_eval refuses to tune tau on any claim the checkpoint was trained on.
+
+On a GPU, mixed precision is used automatically; --grad-accum and --gradient-checkpointing let a large
+model fit on a free Colab T4.  CPU works for a base model but is slow (~15-30 min/epoch).  Model weights go
+to models/ which is git-ignored: do NOT commit them (record the run in eval/results instead).
 """
 from __future__ import annotations
 
@@ -24,15 +42,20 @@ import random
 import time
 from pathlib import Path
 
+from eval.run_eval import tau_tuning_claims
 from eval.train_split import load_split, select_part
 from src.data_io import MIXED, find_scifact_dir, load_claims, load_corpus, sha256_file
-from src.evidence import LexicalSentenceScorer, build_premise, select_sentences
+from src.evidence import build_premise, build_sentence_scorer, select_sentences
 from src.nli import DEFAULT_NLI_MODEL, resolve_label_indices
 from src.retrieval import BM25Retriever
 from src.schema import NEI, SUPPORT
 
 
-def build_training_pairs(claims, corpus_by_id, retriever, scorer, m=3, neg_per_claim=1):
+CLASSES = ("support", "neutral", "contradict")
+
+
+def build_training_pairs(claims, corpus_by_id, retriever, scorer, m=3, neg_per_claim=1, match_inference=False,
+                         gold_doc_neutral=0):
     """Returns list of (premise, claim, class) with class in {"support","neutral","contradict"}."""
     pairs = []
     for c in claims:
@@ -41,10 +64,26 @@ def build_training_pairs(claims, corpus_by_id, retriever, scorer, m=3, neg_per_c
             doc = corpus_by_id.get(doc_id)
             if lab == MIXED or doc is None:
                 continue
+            cls = "support" if lab == SUPPORT else "contradict"
+            premises = set()
             for rset in c.rationale_sets(doc_id):
                 premise = " ".join(doc.sentences[i] for i in rset if i < len(doc.sentences))
                 if premise:
-                    pairs.append((premise, c.claim, "support" if lab == SUPPORT else "contradict"))
+                    premises.add(premise)
+                    pairs.append((premise, c.claim, cls))
+            rationale = set(c.rationale_sentence_idxs(doc_id))
+            if match_inference:
+                idxs = select_sentences(c.claim, doc.sentences, m, scorer)
+                premise = build_premise(doc.sentences, idxs)
+                if rationale & set(idxs) and premise not in premises:
+                    pairs.append((premise, c.claim, cls))
+            if gold_doc_neutral > 0:
+                rest = [i for i in range(len(doc.sentences)) if i not in rationale]
+                scores = scorer.score(c.claim, [doc.sentences[i] for i in rest])
+                ranked = [i for _, i in sorted(zip(scores, rest), key=lambda t: (-t[0], t[1]))]
+                for start in range(0, min(len(ranked), gold_doc_neutral * m), m):
+                    window = sorted(ranked[start : start + m])
+                    pairs.append((build_premise(doc.sentences, window), c.claim, "neutral"))
         if c.gold_label == NEI:
             for doc_id in c.cited_doc_ids:
                 doc = corpus_by_id.get(doc_id)
@@ -63,27 +102,140 @@ def build_training_pairs(claims, corpus_by_id, retriever, scorer, m=3, neg_per_c
     return pairs
 
 
+def _hard_negative_docs(claim, gold, retriever, n):
+    if retriever is None or n <= 0:
+        return []
+    docs = [h.doc for h in retriever.search(claim.claim, n + len(gold) + 3) if h.doc.doc_id not in gold and h.doc.sentences]
+    return docs[:n]
+
+
+def build_abstract_pairs(claims, corpus_by_id, retriever, scorer, neg_per_claim=1, **_):
+    """unit=abstract: the WHOLE abstract is the premise, exactly what the verifier reads at inference.
+
+    Gold paper -> its label; cited papers of NEI claims and retrieved non-gold papers -> neutral.  The gold
+    rationale alone is kept as an extra positive so the model still learns which sentences carry the verdict.
+    """
+    pairs = []
+    for c in claims:
+        gold = set(c.gold_docs)
+        for doc_id, lab in c.gold_doc_labels.items():
+            doc = corpus_by_id.get(doc_id)
+            if lab == MIXED or doc is None or not doc.sentences:
+                continue
+            cls = "support" if lab == SUPPORT else "contradict"
+            pairs.append((" ".join(doc.sentences), c.claim, cls))
+            for rset in c.rationale_sets(doc_id):
+                premise = " ".join(doc.sentences[i] for i in rset if i < len(doc.sentences))
+                if premise:
+                    pairs.append((premise, c.claim, cls))
+        if c.gold_label == NEI:
+            for doc_id in c.cited_doc_ids:
+                doc = corpus_by_id.get(doc_id)
+                if doc is not None and doc.sentences:
+                    pairs.append((" ".join(doc.sentences), c.claim, "neutral"))
+        for doc in _hard_negative_docs(c, gold, retriever, neg_per_claim):
+            pairs.append((" ".join(doc.sentences), c.claim, "neutral"))
+    return pairs
+
+
+def build_sentence_pairs(claims, corpus_by_id, retriever, scorer, neg_per_claim=1, neutral_per_doc=4, **_):
+    """unit=sentence: ONE sentence is the premise, as at inference.
+
+    Rationale sentence -> the paper's label (a multi-sentence rationale is also kept joined, and its single
+    sentences are skipped: alone, each may only partly support the claim).  Neutral: the non-rationale
+    sentences of gold papers and the sentences of cited-NEI / retrieved non-gold papers, taking the
+    neutral_per_doc that look MOST like the claim (the hard cases the aggregator must not fire on).
+    """
+    pairs = []
+
+    def hardest(claim, doc, exclude=()):
+        rest = [i for i in range(len(doc.sentences)) if i not in exclude]
+        scores = scorer.score(claim, [doc.sentences[i] for i in rest])
+        return [i for _, i in sorted(zip(scores, rest), key=lambda t: (-t[0], t[1]))][:neutral_per_doc]
+
+    for c in claims:
+        gold = set(c.gold_docs)
+        for doc_id, lab in c.gold_doc_labels.items():
+            doc = corpus_by_id.get(doc_id)
+            if doc is None or not doc.sentences:
+                continue
+            rationale = set(c.rationale_sentence_idxs(doc_id))
+            if lab != MIXED:
+                cls = "support" if lab == SUPPORT else "contradict"
+                for rset in c.rationale_sets(doc_id):
+                    rset = [i for i in rset if i < len(doc.sentences)]
+                    if rset:
+                        pairs.append((build_premise(doc.sentences, rset), c.claim, cls))
+            for i in hardest(c.claim, doc, exclude=rationale):
+                pairs.append((doc.sentences[i], c.claim, "neutral"))
+        neutral_docs = [corpus_by_id.get(d) for d in c.cited_doc_ids] if c.gold_label == NEI else []
+        neutral_docs += _hard_negative_docs(c, gold, retriever, neg_per_claim)
+        for doc in neutral_docs:
+            if doc is not None and doc.sentences:
+                for i in hardest(c.claim, doc):
+                    pairs.append((doc.sentences[i], c.claim, "neutral"))
+    return pairs
+
+
+PAIR_BUILDERS = {"window": build_training_pairs, "abstract": build_abstract_pairs, "sentence": build_sentence_pairs}
+MAX_LENGTH = {"window": 320, "abstract": 512, "sentence": 160}  # abstracts: median ~190 words, p99 ~450
+
+
+def class_counts(pairs):
+    return {k: sum(1 for p in pairs if p[2] == k) for k in CLASSES}
+
+
+def pair_macro_f1(gold, pred):
+    """Pair-level 3-class macro-F1 (validation only; the reported metric is claim-level, from run_eval)."""
+    f1s = []
+    for k in set(gold):
+        tp = sum(g == k and p == k for g, p in zip(gold, pred))
+        fp = sum(g != k and p == k for g, p in zip(gold, pred))
+        fn = sum(g == k and p != k for g, p in zip(gold, pred))
+        f1s.append(2 * tp / (2 * tp + fp + fn) if tp else 0.0)
+    return sum(f1s) / len(f1s) if f1s else 0.0
+
+
+def split_claims(a, all_claims, train_path):
+    """-> (training claims, held-out claims, info).  With --split-file: train on its fit part, validate on its calib
+    part (the claims run_eval --tune-split-file ... --tune-part calib tunes tau on).  Without: hold out the claims
+    run_eval tunes tau on by default (run_eval.tau_tuning_claims, same --tune-n and --seed)."""
+    if a.split_file:
+        split = load_split(a.split_file)
+        claims = select_part(all_claims, split, a.part, train_path=train_path)
+        heldout = select_part(all_claims, split, "calib" if a.part == "fit" else "fit", train_path=train_path)
+        info = {"which": f"{a.part} part of {a.split_file}", "split_file": str(a.split_file), "part": a.part,
+                "split_sha256": split["source_sha256"][:16], "n_claims": len(claims)}
+    else:
+        heldout = tau_tuning_claims(all_claims, a.tune_n, a.seed) if a.tune_n > 0 else []
+        held = {c.id for c in heldout}
+        claims = [c for c in all_claims if c.id not in held]
+        info = {"which": f"train minus the {len(heldout)} tau-tuning claims (no split file)", "split_file": None,
+                "part": None, "n_claims": len(claims)}
+    if not claims:
+        raise SystemExit(f"no training claims left ({info['which']}); lower --tune-n or check --split-file.")
+    return claims, heldout, info
+
+
 def prepare_pairs(a):
-    """Load train (optionally only one part of the split) and build the pairs.  Never opens dev or test."""
+    """Load train, split it, build training and validation pairs.  Never opens dev or test."""
     data_dir = find_scifact_dir(a.data_dir)
     if data_dir is None:
         raise SystemExit("SciFact not found. Run: python -m data.fetch_scifact")
     corpus = load_corpus(data_dir / "corpus.jsonl")
     by_id = {d.doc_id: d for d in corpus}
     train_path = data_dir / "claims_train.jsonl"  # dev and test are deliberately never opened here
-    claims = load_claims(train_path)
-    if a.split_file:
-        split = load_split(a.split_file)
-        claims = select_part(claims, split, a.part, train_path=train_path)
-        info = {"which": f"{a.part} part of {a.split_file}", "split_file": str(a.split_file), "part": a.part,
-                "split_sha256": split["source_sha256"][:16], "n_claims": len(claims)}
-    else:
-        print("WARNING: no --split-file, training on ALL of train; then tau must not be tuned on train claims.")
-        info = {"which": "all of train (no split file)", "split_file": None, "part": None, "n_claims": len(claims)}
-    pairs = build_training_pairs(claims, by_id, BM25Retriever(corpus), LexicalSentenceScorer.from_docs(corpus),
-                                 m=a.sentences, neg_per_claim=a.neg_per_claim)
-    counts = {k: sum(1 for p in pairs if p[2] == k) for k in ("support", "neutral", "contradict")}
-    return pairs, counts, info, train_path
+    claims, heldout, info = split_claims(a, load_claims(train_path), train_path)
+    retriever = BM25Retriever(corpus)
+    scorer = build_sentence_scorer(a.sentence_scorer, corpus, **({} if a.sentence_scorer == "lexical" else {"device": a.device}))
+    build = dict(m=a.sentences, neg_per_claim=a.neg_per_claim, match_inference=a.match_inference,
+                 gold_doc_neutral=a.gold_doc_neutral, neutral_per_doc=a.neutral_per_doc)
+    builder = PAIR_BUILDERS[a.unit]
+    if a.unit == "window":
+        build.pop("neutral_per_doc")
+    pairs = builder(claims, by_id, retriever, scorer, **build)
+    val_pairs = builder(heldout, by_id, retriever, scorer, **build)
+    return pairs, val_pairs, info, train_path, {c.id for c in heldout}
 
 
 def export_pairs(pairs, path):
@@ -101,12 +253,25 @@ def main(argv=None):
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--batch-size", type=int, default=8)
-    ap.add_argument("--max-length", type=int, default=320)
+    ap.add_argument("--grad-accum", type=int, default=1, help="optimizer step every N batches (effective batch = N x batch-size)")
+    ap.add_argument("--sentence-scorer", default="lexical",
+                    help="selector for the premises built at training time; use the one run_eval will use")
+    ap.add_argument("--unit", default="window", choices=list(PAIR_BUILDERS),
+                    help="evidence unit to train for; evaluate with run_eval --evidence-unit <same>")
+    ap.add_argument("--max-length", type=int, default=None, help="default: 320 window, 512 abstract, 160 sentence")
     ap.add_argument("--neg-per-claim", type=int, default=1)
     ap.add_argument("--sentences", type=int, default=3)
+    ap.add_argument("--match-inference", action=argparse.BooleanOptionalAction, default=True,
+                    help="also train on the sentences our selector picks from gold papers (default on)")
+    ap.add_argument("--gold-doc-neutral", type=int, default=0, help="window unit: non-rationale windows per gold paper -> neutral")
+    ap.add_argument("--neutral-per-doc", type=int, default=4, help="sentence unit: neutral sentences taken per paper")
+    ap.add_argument("--tune-n", type=int, default=200, help="hold out the claims run_eval tunes tau on (same as its --tune-n)")
     ap.add_argument("--max-steps", type=int, default=None, help="stop early (smoke test)")
     ap.add_argument("--class-weights", default="auto", choices=["auto", "none"])
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--warmup", type=float, default=0.1, help="warmup share of optimizer steps")
+    ap.add_argument("--gradient-checkpointing", action="store_true", help="less GPU memory, ~30%% slower (large models)")
+    ap.add_argument("--no-amp", action="store_true", help="disable mixed precision on GPU")
+    ap.add_argument("--seed", type=int, default=0, help="training seed AND the held-out sample (same as run_eval --seed)")
     ap.add_argument("--device", default=None)
     ap.add_argument("--split-file", default=None,
                     help="data/splits/scifact_train_v1.json from eval.train_split: train on its fit part only")
@@ -115,15 +280,18 @@ def main(argv=None):
     ap.add_argument("--export-pairs", default=None,
                     help="also write the pairs as JSONL (put it under data/cache/: it holds SciFact text, never commit it)")
     a = ap.parse_args(argv)
+    a.max_length = a.max_length or MAX_LENGTH[a.unit]
 
     random.seed(a.seed)
-    pairs, counts, claims_info, train_path = prepare_pairs(a)
-    print(f"{len(pairs)} training pairs from {claims_info['n_claims']} claims ({claims_info['which']}): {counts}")
+    pairs, val_pairs, claims_info, train_path, heldout_ids = prepare_pairs(a)
+    counts = class_counts(pairs)
+    print(f"[unit={a.unit}, max_length={a.max_length}] {claims_info['n_claims']} training claims ({claims_info['which']}) "
+          f"-> {len(pairs)} pairs {counts}; {len(heldout_ids)} held-out claims -> {len(val_pairs)} validation pairs")
     if a.export_pairs:
         export_pairs(pairs, a.export_pairs)
         print(f"[written] {a.export_pairs}")
     if a.pairs_only:
-        return {"n_pairs": len(pairs), "class_counts": counts, **claims_info}
+        return {"n_pairs": len(pairs), "class_counts": counts, "n_val_pairs": len(val_pairs), **claims_info}
 
     import numpy as np
     import torch
@@ -133,9 +301,17 @@ def main(argv=None):
     torch.manual_seed(a.seed)
 
     dev = a.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = dev.startswith("cuda") and not a.no_amp
+    # bf16 only on Ampere+ (A100/L4); a T4 reports emulated bf16 support but runs it slowly, so it gets fp16
+    amp_dtype = torch.bfloat16 if use_amp and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     tok = AutoTokenizer.from_pretrained(a.base)
-    model = AutoModelForSequenceClassification.from_pretrained(a.base).to(dev)
+    # fp32 master weights: transformers >= 5 keeps a checkpoint's saved dtype (the MoritzLaurer models are fp16),
+    # and fp16 weights cannot be trained (GradScaler: "Attempting to unscale FP16 gradients"); autocast does the fp16 math
+    model = AutoModelForSequenceClassification.from_pretrained(a.base).float().to(dev)
+    if a.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
     idx = resolve_label_indices(model.config.id2label)
+    inv = {v: k for k, v in idx.items()}
     labels = [idx[p[2]] for p in pairs]
 
     if a.class_weights == "auto":
@@ -146,25 +322,46 @@ def main(argv=None):
     else:
         loss_fn = torch.nn.CrossEntropyLoss()
 
-    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.01)
-    steps_per_epoch = (len(pairs) + a.batch_size - 1) // a.batch_size
-    total = min(steps_per_epoch * a.epochs, a.max_steps or 10**9)
-    sched = get_linear_schedule_with_warmup(opt, int(0.1 * total), total)
+    def encode(batch):
+        return tok([p[0] for p in batch], [p[1] for p in batch], truncation="only_first",
+                   max_length=a.max_length, padding=True, return_tensors="pt").to(dev)
 
-    log, step, t0 = [], 0, time.time()
+    def validate():
+        if not val_pairs:
+            return None
+        model.eval()
+        preds = []
+        with torch.no_grad(), torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+            for s in range(0, len(val_pairs), a.batch_size * 2):
+                preds += model(**encode(val_pairs[s : s + a.batch_size * 2])).logits.argmax(-1).tolist()
+        model.train()
+        return pair_macro_f1([p[2] for p in val_pairs], [inv[i] for i in preds])
+
+    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.01)
+    batches_per_epoch = (len(pairs) + a.batch_size - 1) // a.batch_size
+    total = min(-(-batches_per_epoch // a.grad_accum) * a.epochs, a.max_steps or 10**9)
+    sched = get_linear_schedule_with_warmup(opt, int(a.warmup * total), total)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp and amp_dtype == torch.float16)
+
+    out = Path(a.out)  # created by the first save, so a crashed run leaves no empty checkpoint folder behind
+    log, val_log, best, step, t0 = [], [], None, 0, time.time()
     model.train()
     for epoch in range(a.epochs):
         order = list(range(len(pairs)))
         random.shuffle(order)
-        for s in range(0, len(order), a.batch_size):
+        for bi, s in enumerate(range(0, len(order), a.batch_size)):
             b = order[s : s + a.batch_size]
-            enc = tok([pairs[i][0] for i in b], [pairs[i][1] for i in b], truncation="only_first",
-                      max_length=a.max_length, padding=True, return_tensors="pt").to(dev)
             y = torch.tensor([labels[i] for i in b]).to(dev)
-            loss = loss_fn(model(**enc).logits, y)
-            loss.backward()
+            with torch.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+                logits = model(**encode([pairs[i] for i in b])).logits
+            loss = loss_fn(logits.float(), y)
+            scaler.scale(loss / a.grad_accum).backward()
+            if (bi + 1) % a.grad_accum and s + a.batch_size < len(order):
+                continue
+            scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
+            scaler.step(opt)
+            scaler.update()
             sched.step()
             opt.zero_grad()
             step += 1
@@ -173,19 +370,26 @@ def main(argv=None):
                 log.append({"step": step, "loss": float(loss.item())})
             if a.max_steps and step >= a.max_steps:
                 break
+        f1 = validate()
+        val_log.append({"epoch": epoch + 1, "step": step, "val_pair_macro_f1": f1})
+        print(f"epoch {epoch + 1} done: held-out pair macro-F1 {f1 if f1 is None else round(f1, 4)}")
+        # keep the best epoch (by held-out train claims, never dev); without validation keep the last one
+        if best is None or f1 is None or f1 > best["val_pair_macro_f1"]:
+            best = val_log[-1]
+            model.save_pretrained(out)
+            tok.save_pretrained(out)
         if a.max_steps and step >= a.max_steps:
             break
 
-    out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(out)
-    tok.save_pretrained(out)
     (out / "train_log.json").write_text(json.dumps({
-        "base": a.base, "args": vars(a), "n_pairs": len(pairs), "class_counts": counts, "loss_log": log,
-        "train_file_sha256": sha256_file(train_path)[:16], "claims": claims_info, "seconds": time.time() - t0,
-        "note": "trained on claims_train.jsonl only; evaluate with eval.run_eval on dev",
+        "base": a.base, "args": vars(a), "claims": claims_info, "n_train_claims": claims_info["n_claims"],
+        "n_pairs": len(pairs), "class_counts": counts,
+        "n_val_pairs": len(val_pairs), "heldout_claim_ids": sorted(heldout_ids), "val_log": val_log, "best_epoch": best,
+        "loss_log": log, "train_file_sha256": sha256_file(train_path)[:16], "seconds": time.time() - t0,
+        "device": dev, "amp": str(amp_dtype) if use_amp else None,
+        "note": "trained on the claims in `claims` (never heldout_claim_ids); evaluate with eval.run_eval on dev",
     }, indent=2), encoding="utf-8")
-    print(f"[saved] {out}")
+    print(f"[saved] {out} (best epoch {best['epoch']})")
 
 
 if __name__ == "__main__":

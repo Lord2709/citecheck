@@ -58,7 +58,7 @@ def test_load_split_rejects_overlap(tmp_path):
 def test_finetune_pairs_only_uses_fit_part(fixture_dir, tmp_path):
     split = tmp_path / "split.json"
     train_split.main(["--data-dir", str(fixture_dir), "--out", str(split), "--calib-frac", "0.25"])
-    full = finetune_nli.main(["--data-dir", str(fixture_dir), "--pairs-only"])
+    full = finetune_nli.main(["--data-dir", str(fixture_dir), "--pairs-only", "--tune-n", "0"])
     fit = finetune_nli.main(["--data-dir", str(fixture_dir), "--pairs-only", "--split-file", str(split),
                              "--export-pairs", str(tmp_path / "pairs.jsonl")])
     n_fit = len(json.loads(split.read_text())["fit"])

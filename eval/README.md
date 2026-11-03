@@ -18,10 +18,32 @@ python -m eval.plots --run zero_shot_nli
 
 # 3. improvements (each is one row in the ablation table)
 python -m eval.run_eval --name hybrid_nli --retriever hybrid --verifier nli --compare-with eval/results/zero_shot_nli
-python -m eval.finetune_nli --out models/citecheck-nli-ft            # stretch; GPU/Colab recommended
+python -m eval.finetune_nli --out models/citecheck-nli-ft            # GPU recommended: notebooks/finetune_colab.ipynb
 python -m eval.run_eval --name finetuned_nli --retriever bm25 --verifier nli --model models/citecheck-nli-ft \
                         --oracle --compare-with eval/results/zero_shot_nli
 ```
+
+**Evidence units** (`--evidence-unit`, and `--unit` when fine-tuning): what the verifier reads per paper.
+`window` (default, Session 5) = the top `--sentences` sentences joined; `abstract` = the whole abstract, no selection;
+`sentence` = each sentence on its own, the paper takes its most decisive sentence and those sentences are the evidence
+shown. Promoting a run records its unit in `deployed_config.json`, so the app reads papers the same way.
+
+**Stage 2, hybrid reasoner** (`--reasoner <local LLM> --reasoner-mode hybrid|checks|llm --escalate not-confident|all`):
+claims stage 1 is not confident about are re-judged by `src/reasoning.py` (a small local LLM extracts sentences,
+quantities, p-values and CIs as JSON; Python grounds every number in the text and checks significance and quantities;
+a failed check can make a verdict CONTRADICT, a check never creates a SUPPORT). LLM outputs are cached in
+`eval/cache/`, so the three modes of one model share one generation pass. Not promotable yet (the app has no stage 2).
+
+**Cited-paper setting**: with `--oracle`, `results.json["cited_paper"]` and `predictions_cited_paper.jsonl` hold the
+metric for the product's own question (the user supplies the paper), with a CI and paired comparisons.
+
+**Sentence selector** (`--sentence-scorer cross:<model>`; train one with `python -m eval.train_selector`): replaces
+word-overlap sentence selection. Every run reports `sentence_selection`: how often the selected sentences of a gold
+paper contain a complete gold rationale (word overlap: 0.794 at m=3 on dev).
+
+**Real citations** (`eval/run_realcite.py`, data card `data/realcite/README.md`): scores the citation audit on real
+citing sentences, whole-sentence vs LLM claim extraction. Results computed while any label is unreviewed are flagged
+and must not be quoted.
 
 Smoke test with 20 claims first (`--limit 20`; the run is flagged *partial* and cannot be promoted).
 The first NLI run downloads the model from Hugging Face (~700 MB) and the first dense/hybrid run embeds the
@@ -42,6 +64,9 @@ corpus once (cached in `data/cache/`).
 ## Rules that keep us honest
 
 * **tau (the abstain threshold) is tuned on `train`, reported on `dev`.** Tuning on dev is refused unless `--allow-leak`.
+* **A fine-tuned model never sees the claims tau is tuned on.** `eval.finetune_nli` holds out the same 200 train claims
+  `run_eval` tunes tau on (`run_eval.tau_tuning_claims`, same `--tune-n`/`--seed`) and lists them in the checkpoint's
+  `train_log.json`; `run_eval --model <local dir>` refuses to tune on any other train claim unless `--allow-leak`.
 * `claims_test.jsonl` has no public labels. We never use it.
 * Runs on `tests/fixtures/**` are flagged `synthetic_fixture` and can never be promoted or quoted.
 * `--promote` writes `eval/results/deployed_config.json`; the app loads exactly that configuration and shows its dev score.

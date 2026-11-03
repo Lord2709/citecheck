@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -46,20 +47,54 @@ from src.data_io import (
     sha256_file,
     split_has_labels,
 )
-from src.evidence import LexicalSentenceScorer, score_claim_docs
+from src.evidence import EVIDENCE_UNITS, build_sentence_scorer, score_claim_docs, selection_recall
 from src.nli import DEFAULT_NLI_MODEL, build_verifier
 from src.retrieval import build_retriever
-from src.schema import Hit, LABELS, Probs
+from src.schema import Hit, LABELS, NEI, Probs
 from src.verdict import decide, doc_level_labels
 
 TAU_GRID = [round(x, 2) for x in np.arange(0.05, 1.0, 0.05)]
 RETRIEVAL_DEPTH = 20
 
 
+def tau_tuning_claims(claims, n, seed=0):
+    """The train claims tau is tuned on: a seeded sample of n (all of them when there are <= n).
+
+    eval.finetune_nli calls this too and leaves these claims OUT of training, so a fine-tuned
+    model's tau is tuned on claims it has never seen.  Keep the two in sync by changing only this.
+    """
+    claims = sorted(claims, key=lambda c: c.id)
+    if len(claims) <= n:
+        return claims
+    pick = sorted(np.random.default_rng(seed).choice(len(claims), n, replace=False))
+    return [claims[i] for i in pick]
+
+
+def check_tuning_claims_held_out(model, tune_claims, allow_leak=False):
+    """Refuse to tune tau on train claims that a fine-tuned checkpoint was trained on.
+
+    The record is the checkpoint's train_log.json (local folder or Hub repo); a model without one is taken never to
+    have seen SciFact.  Returns how many tuning claims the model was trained on (non-zero only with allow_leak).
+    """
+    log_path = find_train_log(model)
+    if log_path is None:
+        return 0
+    log = json.loads(log_path.read_text(encoding="utf-8"))
+    held_out = set(log.get("heldout_claim_ids") or [])
+    seen = [c.id for c in tune_claims if c.id not in held_out]
+    if seen and not allow_leak:
+        sys.exit(
+            f"{len(seen)} of the {len(tune_claims)} tau-tuning claims were used to fine-tune {model}, so tau would be "
+            "tuned on training data. Retrain with eval.finetune_nli (it holds these claims out by default, with the "
+            "same --tune-n/--seed), or pass --allow-leak to record the leak."
+        )
+    return len(seen)
+
+
 # --------------------------------------------------------------------------- #
 # Collecting model outputs (the expensive part; cached)
 # --------------------------------------------------------------------------- #
-def collect(claims, corpus_by_id, retriever, verifier, scorer, k, m, mode="e2e", depth=RETRIEVAL_DEPTH):
+def collect(claims, corpus_by_id, retriever, verifier, scorer, k, m, mode="e2e", depth=RETRIEVAL_DEPTH, unit="window"):
     """Run retrieval + verification once and keep everything needed to score at any tau."""
     items, rankings = [], []
     t_ret = 0.0
@@ -81,7 +116,7 @@ def collect(claims, corpus_by_id, retriever, verifier, scorer, k, m, mode="e2e",
         gold_sent = [{d: c.rationale_sentence_idxs(d) for d in c.gold_docs} for c in claims]
 
     t0 = time.perf_counter()
-    scored = score_claim_docs(items, verifier, scorer, m=m, gold_sentences=gold_sent)
+    scored = score_claim_docs(items, verifier, scorer, m=m, gold_sentences=gold_sent, unit=unit)
     t_ver = time.perf_counter() - t0
 
     outputs = []
@@ -113,6 +148,40 @@ def collect(claims, corpus_by_id, retriever, verifier, scorer, k, m, mode="e2e",
 def _cache_path(spec: dict) -> Path:
     key = hashlib.sha1(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:20]
     return Path("eval/cache") / f"collect_{key}.json"
+
+
+def find_train_log(model):
+    """train_log.json of a fine-tuned checkpoint: in its local folder, or in its Hugging Face Hub repo (uploaded with
+    the weights, see the notebook).  None for a model with no log, e.g. a public NLI checkpoint never trained on SciFact."""
+    if not model:
+        return None
+    local = Path(model) / "train_log.json"
+    if local.is_file():
+        return local
+    if Path(model).exists() or model.count("/") != 1:
+        return None
+    try:
+        from huggingface_hub import hf_hub_download
+
+        return Path(hf_hub_download(model, "train_log.json"))
+    except Exception:  # no such file in the repo, no network, or no huggingface_hub
+        return None
+
+
+def _local_train_log(spec):
+    """train_log.json of the checkpoint named by an nli:<model> spec, if there is one (local folder or Hub repo)."""
+    return find_train_log(spec[4:]) if spec.lower().startswith("nli:") else None
+
+
+def _local_model_fingerprint(model):
+    """sha256 prefix of a local checkpoint's weights (None for a Hugging Face id)."""
+    if not model or not Path(model).is_dir():
+        return None
+    weights = sorted(Path(model).glob("*.safetensors")) or sorted(Path(model).glob("*.bin"))
+    h = hashlib.sha256()
+    for w in weights:
+        h.update(sha256_file(w).encode())
+    return h.hexdigest()[:16] if weights else None
 
 
 def collect_cached(spec, use_cache, **kw):
@@ -150,6 +219,73 @@ def predict(outputs, tau, margin=0.0):
             }
         )
     return preds
+
+
+ESCALATE = ("not-confident", "all")
+CONFIDENT = 0.98  # stage-1 verdicts at least this strong are kept (set before any stage-2 result was seen)
+
+
+def needs_reasoning(pred, output, policy):
+    """Stage-1 claims passed to the stage-2 reasoner.  not-confident: stage 1 abstained, or its strongest paper
+    is below CONFIDENT (the 0.9-1.0 band is the only one where finetuned_nli is right more than ~2/3 of the time)."""
+    if not output["docs"]:
+        return False
+    if policy == "all":
+        return True
+    strength = max(max(d["probs"]["support"], d["probs"]["contradict"]) for d in output["docs"])
+    return pred["abstained"] or strength < CONFIDENT
+
+
+def apply_reasoner(preds, outputs, corpus_by_id, reasoner, policy, cache_tag, use_cache=True):
+    """Re-judge the escalated claims with the stage-2 reasoner (one LLM call per judged paper; raw outputs cached,
+    so the hybrid / checks / llm modes of one model share a single generation pass)."""
+    from collections import Counter
+
+    from src.reasoning import PROMPT_VERSION, combine_docs
+
+    path = Path("eval/cache") / ("reason_" + hashlib.sha1(
+        f"{reasoner.llm.model_name}|{PROMPT_VERSION}".encode()).hexdigest()[:16] + ".json")
+    cache = json.loads(path.read_text(encoding="utf-8")) if use_cache and path.exists() else {}
+    by_id = {o["id"]: o for o in outputs}
+    todo = [p for p in preds if needs_reasoning(p, by_id[p["id"]], policy)]
+    jobs = [(p["id"], d["doc_id"]) for p in todo for d in by_id[p["id"]]["docs"] if d["doc_id"] in corpus_by_id]
+    key = lambda cid, did: f"{cache_tag}:{cid}:{did}"  # noqa: E731
+    missing = [(c, d) for c, d in jobs if key(c, d) not in cache]
+    t0 = time.perf_counter()
+    if missing:
+        raw = reasoner.extract([(by_id[c]["claim"], corpus_by_id[d].sentences) for c, d in missing])
+        cache.update({key(c, d): r for (c, d), r in zip(missing, raw)})
+        if use_cache:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(cache), encoding="utf-8")
+    seconds = time.perf_counter() - t0
+    sources, changed = Counter(), 0
+    for p in todo:
+        o = by_id[p["id"]]
+        docs = [d for d in o["docs"] if d["doc_id"] in corpus_by_id]
+        js = [reasoner.judge_raw(o["claim"], corpus_by_id[d["doc_id"]].sentences, cache[key(p["id"], d["doc_id"])]) for d in docs]
+        res = combine_docs(js)
+        p["stage1_pred"] = p["pred"]
+        p["stage2"] = [{"doc_id": d["doc_id"], **{k: v for k, v in j.items() if k != "raw"}} for d, j in zip(docs, js)]
+        for j in js:
+            sources[j["source"]] += 1
+        if res["label"] is None:
+            continue
+        changed += res["label"] != p["pred"]
+        p["pred"], p["abstained"] = res["label"], res["label"] == NEI
+        p["driver_doc"] = docs[res["doc_index"]]["doc_id"] if res["doc_index"] is not None else None
+        p["note"] = "stage2:" + (js[res["doc_index"]]["source"] if res["doc_index"] is not None else res.get("note", "no verdict"))
+    return {"policy": policy, "n_escalated": len(todo), "n_changed": changed, "n_llm_calls": len(missing),
+            "n_paper_judgements": len(jobs), "generation_seconds": seconds,
+            "ms_per_llm_call": 1000 * seconds / len(missing) if missing else None, "sources": dict(sources)}
+
+
+def sentence_selection(claims, corpus_by_id, scorer, m):
+    """How often the m selected sentences of a GOLD paper contain a complete gold rationale (verifier-independent)."""
+    hits = [selection_recall(c.claim, corpus_by_id[d].sentences, c.rationale_sets(d), m, scorer)
+            for c in claims for d in c.gold_docs if d in corpus_by_id]
+    hits = [h for h in hits if h is not None]
+    return {"m": m, "n_gold_papers": len(hits), "rationale_recall_at_m": sum(hits) / len(hits) if hits else None}
 
 
 def claim_level(preds, n_boot=1000, seed=0):
@@ -201,10 +337,20 @@ def tau_sweep(outputs, margin=0.0):
     return rows
 
 
-def tune_tau(outputs, margin=0.0):
-    """Pick tau maximising macro-F1 on the tuning outputs; ties go to the larger (more cautious) tau."""
+def tune_tau(outputs, margin=0.0, fs_cap=None):
+    """Pick tau maximising macro-F1 on the tuning outputs; ties go to the larger (more cautious) tau.
+
+    fs_cap: only consider taus whose false-SUPPORT rate on the tuning outputs is at most fs_cap (the safety-first
+    rule); if none qualifies, take the tau with the lowest false-SUPPORT rate (ties: higher F1).
+    """
+    rows = tau_sweep(outputs, margin)
+    if fs_cap is not None:
+        ok = [r for r in rows if r["false_support_rate"] <= fs_cap]
+        if not ok:
+            return dict(min(rows, key=lambda r: (r["false_support_rate"], -r["macro_f1"], -r["tau"])), met_fs_cap=False)
+        rows = ok
     best = None
-    for row in tau_sweep(outputs, margin):
+    for row in rows:
         if best is None or row["macro_f1"] > best["macro_f1"] + 1e-12 or (
             abs(row["macro_f1"] - best["macro_f1"]) <= 1e-12 and row["tau"] > best["tau"]
         ):
@@ -256,11 +402,17 @@ def build_parser():
     p.add_argument("--verifier", default="nli", help="majority | lexical | nli | nli:<model>")
     p.add_argument("--model", default=None, help=f"NLI checkpoint (default {DEFAULT_NLI_MODEL}); HF id or local folder")
     p.add_argument("--k", type=int, default=3, help="papers judged per claim")
-    p.add_argument("--sentences", type=int, default=3, help="sentences per paper fed to the verifier")
+    p.add_argument("--sentences", type=int, default=3, help="sentences per paper fed to the verifier (window unit)")
+    p.add_argument("--sentence-scorer", default="lexical",
+                   help="how evidence sentences are chosen: lexical (IDF word overlap) | cross:<model> (eval/train_selector.py)")
+    p.add_argument("--evidence-unit", default="window", choices=EVIDENCE_UNITS,
+                   help="what the verifier reads per paper: top sentences joined | whole abstract | each sentence")
     p.add_argument("--tau", type=float, default=None, help="fixed abstain threshold (skips tuning)")
     p.add_argument("--margin", type=float, default=0.0)
     p.add_argument("--tune-split", default="train", choices=["train", "dev", "none"])
     p.add_argument("--tune-n", type=int, default=200, help="claims used to tune tau")
+    p.add_argument("--tune-fs-cap", type=float, default=None,
+                   help="tune tau as best macro-F1 with false-SUPPORT <= this on the tuning claims (safety-first)")
     p.add_argument("--tune-split-file", default=None,
                    help="data/splits/scifact_train_v1.json: tune tau only on one part of train (use with a fine-tuned model)")
     p.add_argument("--tune-part", default="calib", choices=["fit", "calib"],
@@ -274,6 +426,11 @@ def build_parser():
     p.add_argument("--out", default="eval/results")
     p.add_argument("--no-cache", action="store_true")
     p.add_argument("--promote", action="store_true", help="write eval/results/deployed_config.json for the app")
+    p.add_argument("--reasoner", default=None, help="stage 2: local instruction LLM (HF id or folder) for the hybrid reasoner")
+    p.add_argument("--reasoner-mode", default="hybrid", choices=["hybrid", "checks", "llm"])
+    p.add_argument("--escalate", default="not-confident", choices=ESCALATE, help="which claims stage 2 re-judges")
+    p.add_argument("--reasoner-batch-size", type=int, default=8)
+    p.add_argument("--reasoner-max-new-tokens", type=int, default=384)
     p.add_argument("--device", default=None)
     p.add_argument("--batch-size", type=int, default=16)
     return p
@@ -301,19 +458,28 @@ def run(args) -> dict:
     verifier = build_verifier(spec, **verifier_kw)
     retr_kw = {"model_name": args.embed_model} if args.retriever not in ("bm25", "bm25+rerank") else {}
     retriever = build_retriever(args.retriever, corpus, **retr_kw)
-    scorer = LexicalSentenceScorer.from_docs(corpus)
+    scorer = build_sentence_scorer(args.sentence_scorer, corpus, **({} if args.sentence_scorer == 'lexical' else {'device': args.device}))
 
     data_hash = {"corpus": sha256_file(data_dir / "corpus.jsonl")[:16], args.split: sha256_file(split_path)[:16]}
     base_spec = {
         "retriever": retriever.name, "embed": args.embed_model, "verifier": verifier.name, "k": args.k,
         "m": args.sentences, "data": data_hash, "limit": args.limit,
     }
+    if args.evidence_unit != "window":  # keeps Session 5 cache keys valid
+        base_spec["unit"] = args.evidence_unit
+    if args.sentence_scorer != "lexical":
+        base_spec["sentence_scorer"] = args.sentence_scorer
+        if fp := _local_model_fingerprint(args.sentence_scorer[6:]):
+            base_spec["sentence_scorer_sha256_prefix"] = fp
+    fingerprint = _local_model_fingerprint(spec[4:] if spec.lower().startswith("nli:") else None)
+    if fingerprint:  # retraining into the same folder must not reuse the old checkpoint's cached outputs
+        base_spec["model_sha256_prefix"] = fingerprint
 
     def get(split_name, claim_list, mode):
         s = dict(base_spec, split=split_name, mode=mode, n=len(claim_list), first=claim_list[0].id if claim_list else None)
         return collect_cached(
             s, not args.no_cache, claims=claim_list, corpus_by_id=corpus_by_id, retriever=retriever,
-            verifier=verifier, scorer=scorer, k=args.k, m=args.sentences, mode=mode,
+            verifier=verifier, scorer=scorer, k=args.k, m=args.sentences, mode=mode, unit=args.evidence_unit,
         )
 
     # ---- tau: tuned on TRAIN, never on the split we report ---------------------------------
@@ -327,7 +493,7 @@ def run(args) -> dict:
         if args.tune_split == args.split and not args.allow_leak:
             sys.exit("Refusing to tune tau on the split you report on. Use --tune-split train (default) or --allow-leak.")
         tune_path = data_dir / f"claims_{args.tune_split}.jsonl"
-        tune_claims = sorted(load_claims(tune_path), key=lambda c: c.id)
+        tune_claims = load_claims(tune_path)
         split_info = None
         if args.tune_split_file:
             if args.tune_split != "train":
@@ -341,19 +507,23 @@ def run(args) -> dict:
                 sys.exit(f"--tune-split-file: {e}")
             split_info = {"split_file": str(args.tune_split_file), "part": args.tune_part,
                           "split_sha256": split["source_sha256"][:16]}
-        rng = np.random.default_rng(args.seed)
-        if len(tune_claims) > args.tune_n:
-            pick = sorted(rng.choice(len(tune_claims), args.tune_n, replace=False))
-            tune_claims = [tune_claims[i] for i in pick]
+        tune_claims = tau_tuning_claims(tune_claims, args.tune_n, args.seed)
         if args.limit:
             tune_claims = tune_claims[: args.limit]
+        n_trained_on = 0
+        model_path = spec[4:] if spec.lower().startswith("nli:") else None
+        if args.tune_split == "train" and model_path:
+            n_trained_on = check_tuning_claims_held_out(model_path, tune_claims, args.allow_leak)
         tune_name = f"tune-{args.tune_split}" + (f"-{args.tune_part}-{split_info['split_sha256']}" if split_info else "")
         tune_out = get(tune_name, tune_claims, "e2e")["outputs"]  # distinct cache key per split part
-        best = tune_tau(tune_out, args.margin)
+        best = tune_tau(tune_out, args.margin, args.tune_fs_cap)
         tau = best["tau"]
         tuning = {
             "method": "grid_max_macro_f1", "split": args.tune_split, "n_claims": len(tune_claims),
-            "tuned_macro_f1": best["macro_f1"], "leak": args.tune_split == args.split,
+            "tuned_macro_f1": best["macro_f1"], "tuned_false_support_rate": best["false_support_rate"],
+            "fs_cap": args.tune_fs_cap, "met_fs_cap": best.get("met_fs_cap", True) if args.tune_fs_cap is not None else None,
+            "leak": args.tune_split == args.split or n_trained_on > 0,
+            "n_tuning_claims_seen_in_finetuning": n_trained_on,
         }
         if split_info:
             tuning.update(split_info)
@@ -362,6 +532,16 @@ def run(args) -> dict:
     e2e = get(args.split, claims, "e2e")
     outputs = e2e["outputs"]
     preds = predict(outputs, tau, args.margin)
+    reasoner, stage2 = None, {}
+    if args.reasoner:
+        if args.promote:
+            sys.exit("--promote with --reasoner: the app does not run the stage-2 reasoner yet.")
+        from src.reasoning import HybridReasoner, LocalLLM
+
+        reasoner = HybridReasoner(LocalLLM(args.reasoner, device=args.device, batch_size=args.reasoner_batch_size,
+                                           max_new_tokens=args.reasoner_max_new_tokens), mode=args.reasoner_mode)
+        stage2["end_to_end"] = apply_reasoner(preds, outputs, corpus_by_id, reasoner, args.escalate,
+                                              args.split, not args.no_cache)
 
     results = {
         "name": args.name,
@@ -371,7 +551,8 @@ def run(args) -> dict:
         "partial": bool(args.limit),
         "config": {
             "retriever": retriever.name, "embed_model": args.embed_model, "verifier": verifier.name, "k": args.k,
-            "sentences_per_paper": args.sentences, "tau": tau, "margin": args.margin,
+            "sentences_per_paper": args.sentences, "evidence_unit": args.evidence_unit, "sentence_scorer": args.sentence_scorer,
+            "tau": tau, "margin": args.margin,
         },
         "tau_tuning": tuning,
         "data": {"dir": str(data_dir), "sha256_prefix": data_hash, "n_corpus": len(corpus),
@@ -381,10 +562,20 @@ def run(args) -> dict:
             {o["id"]: o["ranking"] for o in outputs}, {o["id"]: set(o["gold_docs"]) for o in outputs}
         ),
         "abstract_level": abstract_level(outputs, tau),
+        "sentence_selection": sentence_selection(claims, corpus_by_id, scorer, args.sentences),
         "tau_sweep_analysis_only": tau_sweep(outputs, args.margin),
         "timing": e2e["timing"],
+        **({"stage2": {"reasoner": reasoner.name, "mode": args.reasoner_mode, "escalate": args.escalate,
+                       "confident_threshold": CONFIDENT, "runs": stage2,
+                       "note": "claim_level, paired comparisons and cited_paper include stage 2; abstract_level, "
+                               "tau_sweep and oracle_rationale are stage 1 only"}} if reasoner else {}),
         "provenance": {"git_commit": _git_commit(), "versions": _versions(), "argv": sys.argv[1:], "seed": args.seed},
     }
+    if model_log := _local_train_log(spec):
+        trained_unit = json.loads(model_log.read_text(encoding="utf-8")).get("args", {}).get("unit", "window")
+        results["config"]["trained_on_unit"] = trained_unit
+        if trained_unit != args.evidence_unit:
+            print(f"[warn] {spec[4:]} was fine-tuned on '{trained_unit}' evidence but is evaluated on '{args.evidence_unit}'")
     if hasattr(verifier, "n_params") and spec.lower().startswith("nli"):
         results["timing"]["n_params"] = verifier.n_params
         results["timing"]["device"] = getattr(verifier, "device", None)
@@ -394,7 +585,14 @@ def run(args) -> dict:
         att = {"end_to_end": results["claim_level"]["macro_f1"]}
         for mode in ("oracle_doc", "oracle_rationale"):
             o = get(args.split, claims, mode)["outputs"]
-            att[mode] = claim_level(predict(o, tau, args.margin), args.n_boot, args.seed)["macro_f1"]
+            mode_preds = predict(o, tau, args.margin)
+            if reasoner is not None and mode == "oracle_doc":
+                stage2["oracle_doc"] = apply_reasoner(mode_preds, o, corpus_by_id, reasoner, args.escalate,
+                                                      args.split, not args.no_cache)
+            if mode == "oracle_doc":  # the product setting: the user gives the paper they cite
+                cited_preds = mode_preds
+                results["cited_paper"] = claim_level(mode_preds, args.n_boot, args.seed)
+            att[mode] = claim_level(mode_preds, args.n_boot, args.seed)["macro_f1"]
         att["loss_from_retrieval"] = att["oracle_doc"] - att["end_to_end"]
         att["loss_from_sentence_selection"] = att["oracle_rationale"] - att["oracle_doc"]
         att["remaining_gap_is_verifier"] = 1.0 - att["oracle_rationale"]
@@ -424,8 +622,28 @@ def run(args) -> dict:
         cmp_.update({"vs": Path(other_dir).name, "n": len(ids)})
         comps.append(cmp_)
     results["paired_comparisons"] = comps
+    if args.oracle:  # same comparison in the cited-paper setting, against runs that saved it
+        cited = {p["id"]: p for p in cited_preds if p["gold"] in LABELS}
+        results["cited_paper"]["paired_comparisons"] = []
+        for other_dir in args.compare_with:
+            pf = Path(other_dir) / "predictions_cited_paper.jsonl"
+            if not pf.exists():
+                continue
+            theirs = {r["id"]: r for r in map(json.loads, pf.read_text(encoding="utf-8").splitlines()) if r["gold"] in LABELS}
+            ids = sorted(set(cited) & set(theirs))
+            if ids:
+                c = M.paired_bootstrap_diff([cited[i]["gold"] for i in ids], [cited[i]["pred"] for i in ids],
+                                            [theirs[i]["pred"] for i in ids], n_boot=args.n_boot, seed=args.seed)
+                c.update({"vs": Path(other_dir).name, "n": len(ids)})
+                results["cited_paper"]["paired_comparisons"].append(c)
 
     write_outputs(Path(args.out) / args.name, results, preds, outputs)
+    if args.oracle:
+        with open(Path(args.out) / args.name / "predictions_cited_paper.jsonl", "w", encoding="utf-8") as f:
+            for p in cited_preds:
+                f.write(json.dumps(p) + "\n")
+    if model_log := _local_train_log(spec):  # keep the fine-tuning record (held-out ids, validation curve) with the run
+        shutil.copyfile(model_log, Path(args.out) / args.name / "train_log.json")
     write_latest(Path(args.out))
     if args.promote:
         promote(Path(args.out), results, args)
@@ -448,7 +666,8 @@ def summary_md(r: dict) -> str:
         + ("  **PARTIAL run (--limit).**" if r["partial"] else ""),
         "",
         f"- retriever `{r['config']['retriever']}`, verifier `{r['config']['verifier']}`, k={r['config']['k']}, "
-        f"sentences/paper={r['config']['sentences_per_paper']}, tau={r['config']['tau']}",
+        f"sentences/paper={r['config']['sentences_per_paper']}, evidence unit={r['config'].get('evidence_unit', 'window')}, "
+        f"tau={r['config']['tau']}",
         f"- tau tuning: {r['tau_tuning']}",
         "",
         "## Claim-level (3-class: SUPPORT / CONTRADICT / NEI)",
@@ -491,6 +710,24 @@ def summary_md(r: dict) -> str:
             f"\n**vs `{c['vs']}`**: macro-F1 difference {c['diff']:+.3f}, 95% CI [{c['ci95'][0]:+.3f}, {c['ci95'][1]:+.3f}], "
             f"P(this run better) = {c['p_a_better']:.2f}  (n={c['n']})"
         )
+    if r.get("sentence_selection", {}).get("rationale_recall_at_m") is not None:
+        ss = r["sentence_selection"]
+        lines += ["", f"## Sentence selection (`{r['config'].get('sentence_scorer', 'lexical')}`)",
+                  f"- a complete gold rationale is among the {ss['m']} selected sentences for "
+                  f"{ss['rationale_recall_at_m']:.3f} of {ss['n_gold_papers']} gold papers"]
+    if "cited_paper" in r:
+        cp = r["cited_paper"]
+        lines += ["", "## Cited-paper setting (the product: the user gives the paper; = oracle_doc)",
+                  f"- macro-F1 {cp['macro_f1']:.3f}  95% CI {_fmt_ci(cp['macro_f1_ci95'])}  false-SUPPORT {cp['false_support_rate']:.3f}"]
+        for c in cp.get("paired_comparisons", []):
+            lines.append(f"- vs `{c['vs']}`: {c['diff']:+.3f}, 95% CI [{c['ci95'][0]:+.3f}, {c['ci95'][1]:+.3f}] (n={c['n']})")
+    if "stage2" in r:
+        s2 = r["stage2"]
+        lines += ["", f"## Stage 2: `{s2['reasoner']}` (escalate: {s2['escalate']})"]
+        for where, st in s2["runs"].items():
+            lines.append(f"- {where}: {st['n_escalated']} claims escalated, {st['n_changed']} verdicts changed, "
+                         f"{st['n_llm_calls']} LLM calls; sources {st['sources']}")
+        lines.append(f"- {s2['note']}")
     t = r["timing"]
     lines += [
         "",
@@ -516,11 +753,17 @@ def write_outputs(out_dir: Path, results: dict, preds: list, outputs: list):
     print(f"[saved] {out_dir}")
 
 
+def unit_tag(config: dict) -> str:
+    unit = config.get("evidence_unit", "window")
+    return "" if unit == "window" else f" [{unit}]"
+
+
 def write_latest(out_root: Path):
     rows = []
     for rj in sorted(out_root.glob("*/results.json")):
         r = json.loads(rj.read_text(encoding="utf-8"))
-        rows.append(r)
+        if "claim_level" in r:  # other harnesses (eval/run_realcite.py) share eval/results/ with their own format
+            rows.append(r)
     rows.sort(key=lambda r: r["created_utc"])
     lines = [
         "# All evaluation runs",
@@ -530,9 +773,10 @@ def write_latest(out_root: Path):
     ]
     for r in rows:
         cl, rt, c = r["claim_level"], r["retrieval"], r["config"]
-        flags = ", ".join(x for x, on in (("SYNTHETIC", r["synthetic_fixture"]), ("partial", r["partial"])) if on) or "-"
+        flags = ", ".join(x for x, on in (("SYNTHETIC", r["synthetic_fixture"]), ("partial", r["partial"]),
+                                          (f"stage2:{r.get('stage2', {}).get('mode')}", "stage2" in r)) if on) or "-"
         lines.append(
-            f"| {r['name']} | {r['split']} | {c['retriever']} | {c['verifier']} | {c['tau']} | {cl['macro_f1']:.3f} {_fmt_ci(cl['macro_f1_ci95'])} "
+            f"| {r['name']} | {r['split']} | {c['retriever']} | {c['verifier']}{unit_tag(c)} | {c['tau']} | {cl['macro_f1']:.3f} {_fmt_ci(cl['macro_f1_ci95'])} "
             f"| {cl['false_support_rate']:.3f} | {rt['recall@5']:.3f} | {flags} |"
         )
     (out_root / "LATEST.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -548,6 +792,8 @@ def promote(out_root: Path, results: dict, args):
         "verifier": args.verifier if not args.model else f"nli:{args.model}",
         "k": args.k,
         "sentences_per_paper": args.sentences,
+        "evidence_unit": args.evidence_unit,
+        "sentence_scorer": args.sentence_scorer,
         "tau": results["config"]["tau"],
         "margin": args.margin,
         "dev_macro_f1": results["claim_level"]["macro_f1"],

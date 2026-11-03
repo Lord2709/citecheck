@@ -16,7 +16,8 @@ def base_args(fixture_dir, out, name, verifier="lexical", extra=()):
 def test_full_run_and_files(fixture_dir, tmp_path):
     res = run_eval.main(base_args(fixture_dir, tmp_path, "lexical", extra=["--oracle"]))
     d = tmp_path / "lexical"
-    assert {p.name for p in d.iterdir()} == {"results.json", "predictions.jsonl", "summary.md"}
+    assert {p.name for p in d.iterdir()} == {"results.json", "predictions.jsonl", "summary.md", "predictions_cited_paper.jsonl"}
+    assert res["cited_paper"]["macro_f1"] == res["error_attribution"]["oracle_doc"]
     assert res["synthetic_fixture"] is True and res["partial"] is False
     assert res["claim_level"]["n"] == 10 and res["claim_level"]["n_mixed_excluded"] == 0
     assert res["tau_tuning"]["split"] == "train" and res["tau_tuning"]["leak"] is False
@@ -107,14 +108,54 @@ def test_real_transformer_end_to_end_and_finetune(fixture_dir, tmp_path):
 
     tiny = make_tiny_nli(tmp_path / "base")
     out = tmp_path / "ft"
-    finetune_nli.main(["--base", tiny, "--data-dir", str(fixture_dir), "--out", str(out), "--epochs", "1",
-                       "--max-steps", "3", "--batch-size", "4", "--device", "cpu", "--max-length", "64"])
+    finetune_nli.main(["--base", tiny, "--data-dir", str(fixture_dir), "--out", str(out), "--epochs", "2",
+                       "--max-steps", "3", "--batch-size", "4", "--device", "cpu", "--max-length", "64",
+                       "--tune-n", "3", "--no-match-inference"])
     assert (out / "train_log.json").exists() and (out / "config.json").exists()
     log = json.loads((out / "train_log.json").read_text())
-    assert "claims_dev" not in json.dumps(log["args"]) and log["n_pairs"] == len(pairs)
-    # the fine-tuned checkpoint plugs straight into the evaluation harness
-    r = run_eval.main(base_args(fixture_dir, tmp_path / "res", "ft", verifier="nli", extra=["--model", str(out), "--device", "cpu"]))
+    heldout = {c.id for c in run_eval.tau_tuning_claims(load_claims(fixture_dir / "claims_train.jsonl"), 3, 0)}
+    assert "claims_dev" not in json.dumps(log["args"]) and set(log["heldout_claim_ids"]) == heldout
+    trained = [c for c in load_claims(fixture_dir / "claims_train.jsonl") if c.id not in heldout]
+    assert log["n_pairs"] == len(finetune_nli.build_training_pairs(
+        trained, {d.doc_id: d for d in corpus}, BM25Retriever(corpus), LexicalSentenceScorer.from_docs(corpus)))
+    assert log["val_log"] and log["val_log"][0]["val_pair_macro_f1"] is not None
+    # the fine-tuned checkpoint plugs straight into the evaluation harness, tuning tau on the held-out claims only
+    r = run_eval.main(base_args(fixture_dir, tmp_path / "res", "ft", verifier="nli",
+                                extra=["--model", str(out), "--device", "cpu", "--tune-n", "3"]))
     assert r["config"]["verifier"].startswith("nli:") and r["timing"]["n_params"] > 0
+    assert r["tau_tuning"]["leak"] is False and r["tau_tuning"]["n_tuning_claims_seen_in_finetuning"] == 0
+    assert json.loads((tmp_path / "res" / "ft" / "train_log.json").read_text()) == log  # travels with the results
+    # tuning tau on claims the checkpoint was trained on is refused, or recorded as a leak with --allow-leak
+    with pytest.raises(SystemExit):
+        run_eval.main(base_args(fixture_dir, tmp_path / "res", "ft2", verifier="nli", extra=["--model", str(out), "--device", "cpu"]))
+    r = run_eval.main(base_args(fixture_dir, tmp_path / "res", "ft3", verifier="nli",
+                                extra=["--model", str(out), "--device", "cpu", "--allow-leak"]))
+    assert r["tau_tuning"]["leak"] is True and r["tau_tuning"]["n_tuning_claims_seen_in_finetuning"] > 0
+
+
+def test_match_inference_pairs_use_selector_output(fixture_dir):
+    from eval import finetune_nli
+    from src.data_io import load_corpus
+    from src.evidence import LexicalSentenceScorer
+
+    corpus = load_corpus(fixture_dir / "corpus.jsonl")
+    by_id, scorer = {d.doc_id: d for d in corpus}, LexicalSentenceScorer.from_docs(corpus)
+    claims = load_claims(fixture_dir / "claims_train.jsonl")
+    base = finetune_nli.build_training_pairs(claims, by_id, None, scorer, m=2)
+    more = finetune_nli.build_training_pairs(claims, by_id, None, scorer, m=2, match_inference=True, gold_doc_neutral=1)
+    assert set(base) <= set(more) and len(more) > len(base)
+    for premise, claim, cls in set(more) - set(base):
+        assert cls in finetune_nli.CLASSES and premise and claim
+
+
+def test_tau_tuning_claims_matches_session5_sample(fixture_dir):
+    """The refactored helper must pick the same claims the inline Session 5 code did (results stay comparable)."""
+    import numpy as np
+
+    claims = sorted(load_claims(fixture_dir / "claims_train.jsonl"), key=lambda c: c.id)
+    pick = sorted(np.random.default_rng(0).choice(len(claims), 3, replace=False))
+    assert [c.id for c in run_eval.tau_tuning_claims(claims, 3, 0)] == [claims[i].id for i in pick]
+    assert len(run_eval.tau_tuning_claims(claims, 100, 0)) == len(claims)
 
 
 def test_versions_come_from_package_metadata():
@@ -140,3 +181,83 @@ def test_error_report_names_the_driver_paper():
     assert "rank 2" in label and "Off-topic paper" in label and "NOT a gold paper" in label
     assert "a gold evidence paper" in _driver_label({"driver_doc": "1", "gold_docs": ["1"]}, {"doc_id": "1", "rank": 1}, corpus)
     assert _driver_label({"driver_doc": None, "gold_docs": []}, {"doc_id": "1", "rank": 1}, corpus).startswith("none (abstained)")
+
+
+def test_cache_key_changes_when_a_local_checkpoint_is_retrained(tmp_path):
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from tests.tiny_model import make_tiny_nli
+
+    path = tmp_path / "ft"
+    make_tiny_nli(path, seed=0)
+    a = run_eval._local_model_fingerprint(str(path))
+    make_tiny_nli(path, seed=1)  # "retrain" into the same folder
+    assert a and run_eval._local_model_fingerprint(str(path)) != a
+    assert run_eval._local_model_fingerprint("MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli") is None
+
+
+def test_finetune_trains_fp32_weights_from_an_fp16_checkpoint(fixture_dir, tmp_path):
+    """Colab crash: the MoritzLaurer checkpoints are stored in fp16 and transformers 5 loads them as fp16."""
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    from transformers import AutoModelForSequenceClassification
+
+    from eval import finetune_nli
+    from tests.tiny_model import make_tiny_nli
+
+    base = make_tiny_nli(tmp_path / "base")
+    AutoModelForSequenceClassification.from_pretrained(base).half().save_pretrained(base)
+    out = tmp_path / "ft"
+    finetune_nli.main(["--base", base, "--data-dir", str(fixture_dir), "--out", str(out), "--epochs", "1",
+                       "--max-steps", "2", "--batch-size", "4", "--device", "cpu", "--max-length", "64", "--tune-n", "3"])
+    model = AutoModelForSequenceClassification.from_pretrained(out)
+    assert all(p.dtype == torch.float32 for p in model.parameters())
+
+
+def test_train_log_is_found_locally_or_on_the_hub(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    (tmp_path / "ft").mkdir()
+    (tmp_path / "ft" / "train_log.json").write_text("{}")
+    assert run_eval.find_train_log(str(tmp_path / "ft")) == tmp_path / "ft" / "train_log.json"
+    assert run_eval.find_train_log(str(tmp_path / "empty-local-dir")) is None
+
+    hub_log = tmp_path / "hub_log.json"
+    hub_log.write_text(json.dumps({"heldout_claim_ids": [1]}))
+    calls = []
+    fake = types.ModuleType("huggingface_hub")
+    fake.hf_hub_download = lambda repo, name: calls.append((repo, name)) or str(hub_log)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake)
+    assert run_eval.find_train_log("someone/citecheck-nli-ft") == hub_log and calls == [("someone/citecheck-nli-ft", "train_log.json")]
+    assert run_eval.find_train_log("not-a-repo-id") is None
+
+    def missing(repo, name):
+        raise FileNotFoundError(name)
+
+    fake.hf_hub_download = missing
+    assert run_eval.find_train_log("MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli") is None
+
+
+def test_latest_table_ignores_other_result_formats(fixture_dir, tmp_path):
+    (tmp_path / "realcite_audit").mkdir()
+    (tmp_path / "realcite_audit" / "results.json").write_text(json.dumps({"name": "realcite_audit", "systems": {}}))
+    run_eval.main(base_args(fixture_dir, tmp_path, "lexical"))   # rebuilding LATEST.md must not crash
+    assert "| lexical |" in (tmp_path / "LATEST.md").read_text() and "realcite" not in (tmp_path / "LATEST.md").read_text()
+
+
+def test_tune_tau_with_a_false_support_cap():
+    def out(gold, s):  # one claim, one paper with support probability s
+        return {"id": 0, "gold_label": gold, "docs": [{"doc_id": "d", "probs": {"support": s, "neutral": 1 - s, "contradict": 0.0}}]}
+
+    outputs = [out("SUPPORT", 0.9)] + [out("SUPPORT", 0.3)] * 5 + [out("NEI", 0.3)] + [out("NEI", 0.1)] * 2
+    free = run_eval.tune_tau(outputs)
+    assert free["tau"] <= 0.3 and free["false_support_rate"] > 0          # best F1 accepts the 0.3 false SUPPORT
+    capped = run_eval.tune_tau(outputs, fs_cap=0.0)
+    assert capped["tau"] > 0.3 and capped["false_support_rate"] == 0.0
+    assert run_eval.tune_tau([out("NEI", 0.99)], fs_cap=0.0)["met_fs_cap"] is False
+
+
+def test_run_records_the_fs_cap(fixture_dir, tmp_path):
+    r = run_eval.main(base_args(fixture_dir, tmp_path, "capped", extra=["--tune-fs-cap", "0.1"]))
+    assert r["tau_tuning"]["fs_cap"] == 0.1 and r["tau_tuning"]["met_fs_cap"] in (True, False)
