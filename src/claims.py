@@ -1,140 +1,201 @@
-"""Citation-context analysis: which claims does a citing sentence attribute to the cited paper?   Owner: Modeling.
+"""Find every cited claim in a draft and link it to its reference entry.   Owner: Engineering.
 
-The citation audit used to send the whole cleaned citing sentence to the verifier.  Real citing sentences are not
-SciFact-style atomic claims: they bundle several claims ("X improves accuracy but costs compute [12]"), mix the
-citing authors' own results with the cited work ("Unlike [12], our model is faster"), or cite a paper only for a
-method.  A small LOCAL LLM (src/reasoning.LocalLLM) reads the sentence and returns the atomic claims attributed to
-the citation, each with the exact words it restates.  Nothing it writes is trusted unchecked:
+Input: plain text (pasted, or extracted from a text-based PDF), optionally ending with a reference list.
+Output: one CitedClaim per sentence that carries a citation, with the reference entries it points to.
 
-    grounding      every claim must come with a source_quote that literally occurs in the citing sentence
-    faithfulness   the NLI verifier must find quote => claim AND claim => quote, so a rewrite cannot add or drop
-                   content ("is associated with" must not become "causes", and vice versa)
-    scope          claims the LLM marks as needing more context, or as the citing authors' own, are not verified
-
-aggregate() turns per-claim verdicts into one per reference: any CONTRADICT -> CONTRADICT; all SUPPORT -> SUPPORT;
-some SUPPORT and the rest NEI -> PARTIAL; otherwise NEI.
+Citation styles handled (rule-based; covers the common cases, not every style guide):
+  numeric      ... reduces infection [3].   [3, 5]   [4-6]   [4–6]
+  author-year  ... reduces infection (Smith et al., 2019; Lee and Park, 2020).   Smith et al. (2019) showed ...
+  inline id    ... (doi:10.1038/nature14539)   arXiv:2004.14974
+Reference list: everything after a heading line "References", "Bibliography", "Works cited" or "Literature cited".
+Entries: "[1] ...", "1. ...", "1) ..." (numeric), or one entry per line / paragraph (author-year).
 """
 from __future__ import annotations
 
 import re
-import unicodedata
-from dataclasses import dataclass
-from typing import Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Optional
 
-from .reasoning import parse_json
-from .schema import CONTRADICT, NEI, PARTIAL, SUPPORT
+from .ingest import clean_context, parse_identifier
+from .text_utils import split_sentences
 
-PROMPT_VERSION = "claims-v1"
-ROLES = ("background", "method", "result", "comparison", "other")
-
-_EXAMPLE = """Example. Cited paper: "Attention is all you need"
-Citing sentence: Transformers improve translation quality [12] but require substantial compute, unlike our model which runs on a phone.
-Answer: {"claims": [
- {"claim": "Transformers improve translation quality.", "source_quote": "Transformers improve translation quality", "role": "result", "needs_more_context": false},
- {"claim": "Transformers require substantial compute.", "source_quote": "require substantial compute", "role": "result", "needs_more_context": false}]}
-("our model runs on a phone" is the citing authors' own claim, so it is left out.)"""
-
-
-def build_prompt(context: str, cited_title: str, intents: Sequence = ()) -> str:
-    hint = f" Semantic Scholar labels this citation's intent as: {', '.join(intents)}." if intents else ""
-    return (
-        "You analyse a sentence from a scientific paper that cites another paper. List the claims the sentence "
-        f"attributes to the CITED paper.{hint}\n"
-        "Rules:\n"
-        "- Split compound statements into short, self-contained claims; resolve 'it'/'this' only from the sentence itself.\n"
-        "- Leave out the citing authors' own results, plans and opinions, and anything not attributed to the cited paper.\n"
-        "- Keep the original strength: do not turn 'associated with' into 'causes', 'may' into 'does', or the reverse.\n"
-        "- source_quote: the exact words of the sentence that the claim restates (copied, not paraphrased).\n"
-        "- role: background | method | result | comparison | other.\n"
-        "- needs_more_context: true if you cannot tell what exactly is attributed to the cited paper.\n"
-        "- If the paper is cited only as a source of a method, tool or dataset with no factual claim, return no claims.\n"
-        'Answer with one JSON object and nothing else: {"claims": [{"claim": "...", "source_quote": "...", '
-        '"role": "...", "needs_more_context": false}]}\n\n'
-        f"{_EXAMPLE}\n\nCited paper: \"{cited_title}\"\nCiting sentence: {context}\nAnswer:"
-    )
-
-
-def _norm(text: str) -> str:
-    """Letters and digits only, lower-cased, after Unicode normalisation.  Semantic Scholar contexts come from PDF
-    extraction ("ef ﬁ ciency", "cir-cularization", "degrada-tionmechanism"), so a faithful quote can differ from the
-    stored sentence in ligatures, hyphenation and spacing; the words themselves must still match exactly."""
-    text = unicodedata.normalize("NFKC", text or "").lower()
-    return re.sub(r"[^0-9a-z]+", "", text)
+REF_HEADING = re.compile(r"^\s*(?:\d+\.?\s*)?(references|bibliography|works cited|literature cited|reference list)\s*:?\s*$",
+                         re.I | re.M)
+NUMERIC = re.compile(r"\[\s*(\d+(?:\s*[,–—-]\s*\d+)*)\s*\]")
+PAREN = re.compile(r"\(([^()]*?\b(?:19|20)\d{2}[a-z]?\b[^()]*)\)")
+NARRATIVE = re.compile(r"\b([A-Z][A-Za-z\-'’]+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-'’]+)?\s+\(((?:19|20)\d{2}[a-z]?)\)")
+YEAR = re.compile(r"\b((?:19|20)\d{2})[a-z]?\b")
+NUM_ENTRY = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)[.)])\s+(.*)$")
+MAX_RANGE = 30
 
 
 @dataclass
-class ExtractedClaim:
-    claim: str
-    source_quote: str
-    role: str = "result"
-    status: str = "checked"  # checked | needs_more_context | unfaithful | ungrounded
-    faithfulness: Optional[tuple] = None  # (P(quote => claim), P(claim => quote))
-    note: str = ""
+class RefEntry:
+    key: str            # "3" for numeric entries, "smith2019" for author-year entries
+    text: str
 
 
-def parse_claims(raw: str, context: str) -> Optional[list]:
-    """LLM output -> grounded ExtractedClaims; None when the output is unusable (caller falls back)."""
-    obj = parse_json(raw)
-    if obj is None or not isinstance(obj.get("claims"), list):
-        return None
-    ctx = _norm(context)
-    out = []
-    for c in obj["claims"]:
-        if not isinstance(c, dict) or not str(c.get("claim", "")).strip():
+@dataclass
+class CitedClaim:
+    index: int           # 1-based position among cited sentences
+    sentence: str        # the sentence as written
+    claim: str           # the sentence with citation markers removed: what we verify
+    markers: list = field(default_factory=list)       # the markers as written, e.g. ["[3]", "(Smith et al., 2019)"]
+    keys: list = field(default_factory=list)          # reference keys they point to, in order
+    inline_ids: list = field(default_factory=list)    # DOIs / arXiv ids written in the sentence itself
+
+
+@dataclass
+class DraftParse:
+    claims: list
+    references: dict     # key -> RefEntry
+    style: str           # numeric | author-year | mixed | none
+    warnings: list = field(default_factory=list)
+
+    def entry(self, key: str) -> Optional[RefEntry]:
+        return self.references.get(key)
+
+
+def _surname_key(surname: str, year: str) -> str:
+    return re.sub(r"[^a-z]", "", surname.lower()) + year
+
+
+def split_body_and_references(text: str):
+    """(body, reference_block).  The LAST matching heading wins (a paper may mention 'references' earlier)."""
+    matches = list(REF_HEADING.finditer(text or ""))
+    if not matches:
+        return text or "", ""
+    m = matches[-1]
+    return text[: m.start()], text[m.end():]
+
+
+def parse_reference_list(block: str) -> dict:
+    """key -> RefEntry.  Numeric entries keyed by number; others by first-author surname + year."""
+    lines = [l.rstrip() for l in (block or "").splitlines()]
+    refs, current = {}, None
+    numbered = any(NUM_ENTRY.match(l) for l in lines)
+    entries = []
+    for l in lines:
+        if not l.strip():
+            current = None if not numbered else current
             continue
-        claim, quote = str(c["claim"]).strip()[:400], str(c.get("source_quote", "")).strip()
-        role = str(c.get("role", "other")).lower()
-        role = role if role in ROLES else "other"
-        if not quote or _norm(quote) not in ctx:
-            out.append(ExtractedClaim(claim, quote, role, "ungrounded", note="source_quote is not in the citing sentence"))
-        elif c.get("needs_more_context") is True:
-            out.append(ExtractedClaim(claim, quote, role, "needs_more_context", note="the sentence alone does not say what is cited"))
+        m = NUM_ENTRY.match(l) if numbered else None
+        if m:
+            current = [m.group(1) or m.group(2), m.group(3).strip()]
+            entries.append(current)
+        elif current is not None and (numbered or l[:1].isspace() or l[:1].islower()):
+            current[1] += " " + l.strip()          # continuation line
+        elif not numbered:
+            current = [None, l.strip()]
+            entries.append(current)
+    for num, txt in entries:
+        if num is not None:
+            refs[num] = RefEntry(num, txt)
+            continue
+        first = re.match(r"\s*([A-Z][A-Za-z\-'’]+)", txt)
+        year = YEAR.search(txt)
+        if first and year:
+            key = _surname_key(first.group(1), year.group(1))
+            while key in refs:                     # Smith 2019a / 2019b: keep both, suffix the second
+                key += "+"
+            refs[key] = RefEntry(key, txt)
+    return refs
+
+
+def _expand_numeric(group: str) -> list:
+    keys = []
+    for part in re.split(r"\s*,\s*", group):
+        rng = re.split(r"\s*[–—-]\s*", part)
+        if len(rng) == 2 and rng[0].isdigit() and rng[1].isdigit():
+            a, b = int(rng[0]), int(rng[1])
+            if a <= b and b - a <= MAX_RANGE:
+                keys += [str(i) for i in range(a, b + 1)]
+                continue
+        if part.isdigit():
+            keys.append(part)
+    return keys
+
+
+def _author_year_keys(inner: str) -> list:
+    keys = []
+    for part in inner.split(";"):
+        y = YEAR.search(part)
+        s = re.search(r"([A-Z][A-Za-z\-'’]+)", part)
+        if y and s:
+            keys.append(_surname_key(s.group(1), y.group(1)))
+    return keys
+
+
+def find_markers(sentence: str):
+    """(markers as written, reference keys, inline identifiers)."""
+    markers, keys, ids = [], [], []
+    for m in NUMERIC.finditer(sentence):
+        markers.append(m.group(0))
+        keys += _expand_numeric(m.group(1))
+    for m in PAREN.finditer(sentence):
+        inner = m.group(1)
+        if re.search(r"\bdoi\b|10\.\d{4,9}/|arxiv", inner, re.I):
+            continue                                   # handled as an inline identifier below
+        k = _author_year_keys(inner)
+        if k:
+            markers.append(m.group(0))
+            keys += k
+    for m in NARRATIVE.finditer(sentence):
+        markers.append(m.group(0))
+        keys.append(_surname_key(m.group(1), m.group(2)[:4]))
+    for chunk in re.findall(r"(?:doi:?\s*)?10\.\d{4,9}/[^\s\"<>)\]]+|arXiv:\s*\d{4}\.\d{4,5}(?:v\d+)?", sentence, re.I):
+        pid = parse_identifier(chunk.replace(" ", ""))
+        if pid:
+            markers.append(chunk)
+            ids.append(f"{pid.kind}:{pid.value}" if pid.kind != "doi" else pid.value)
+    seen = set()
+    keys = [k for k in keys if not (k in seen or seen.add(k))]
+    return markers, keys, ids
+
+
+def _strip_markers(sentence: str, markers: list) -> str:
+    s = sentence
+    for m in markers:
+        if NARRATIVE.fullmatch(m):
+            s = s.replace(m, re.sub(r"\s*\((?:19|20)\d{2}[a-z]?\)", "", m))
         else:
-            out.append(ExtractedClaim(claim, quote, role))
-    return out
+            s = s.replace(m, "")
+    s = re.sub(r"\(\s*(?:doi:?)?\s*\)", "", s, flags=re.I)
+    return clean_context(s)
 
 
-class ClaimExtractor:
-    """llm: anything with .generate(prompts) -> texts (src/reasoning.LocalLLM).  verifier: the NLI verifier used
-    for the faithfulness check (None skips it, recorded on each claim)."""
-
-    def __init__(self, llm, verifier=None, faithfulness_threshold: float = 0.5):
-        self.llm, self.verifier, self.threshold = llm, verifier, faithfulness_threshold
-        self.name = f"{getattr(llm, 'model_name', 'llm')}:{PROMPT_VERSION}"
-
-    def check_faithfulness(self, claims: list) -> None:
-        todo = [c for c in claims if c.status == "checked"]
-        if not todo or self.verifier is None:
-            return
-        pairs = [p for c in todo for p in ((c.source_quote, c.claim), (c.claim, c.source_quote))]
-        probs = self.verifier.predict_pairs(pairs)
-        for i, c in enumerate(todo):
-            fwd, back = probs[2 * i].support, probs[2 * i + 1].support
-            c.faithfulness = (round(fwd, 3), round(back, 3))
-            if min(fwd, back) < self.threshold:
-                c.status, c.note = "unfaithful", f"the rewrite does not mean the same as the quote ({fwd:.2f} / {back:.2f})"
-
-    def extract(self, items: Sequence) -> list:
-        """items: [(context, cited_title, intents)] -> per item a list[ExtractedClaim], or None if the LLM failed."""
-        raws = self.llm.generate([build_prompt(c, t, i) for c, t, i in items])
-        results = []
-        for (context, _, _), raw in zip(items, raws):
-            claims = parse_claims(raw, context)
-            if claims is not None:
-                self.check_faithfulness(claims)
-            results.append(claims)
-        return results
+def resolve_key(key: str, refs: dict) -> Optional[str]:
+    """Exact key, else the same surname+year with a/b suffix variants."""
+    if key in refs:
+        return key
+    for k in refs:
+        if k.rstrip("+") == key:
+            return k
+    return None
 
 
-def aggregate(labels: Sequence) -> Optional[str]:
-    """Per-claim verdict labels of one reference -> its overall label (None when nothing was verified)."""
-    labels = [lab for lab in labels if lab]
-    if not labels:
-        return None
-    if CONTRADICT in labels:
-        return CONTRADICT
-    if all(lab == SUPPORT for lab in labels):
-        return SUPPORT
-    if SUPPORT in labels:
-        return PARTIAL
-    return NEI
+def parse_draft(text: str, max_claims: int = 200) -> DraftParse:
+    body, ref_block = split_body_and_references(text or "")
+    refs = parse_reference_list(ref_block)
+    warnings, claims = [], []
+    numeric_seen = author_seen = False
+    for sent in split_sentences(body):
+        markers, keys, ids = find_markers(sent)
+        if not markers:
+            continue
+        numeric_seen |= any(k.isdigit() for k in keys)
+        author_seen |= any(not k.isdigit() for k in keys)
+        resolved = [resolve_key(k, refs) or k for k in keys]
+        claim = _strip_markers(sent, markers)
+        if len(claim.split()) < 3:
+            warnings.append(f"Skipped a citation with too little text to check: “{sent[:80]}”")
+            continue
+        claims.append(CitedClaim(len(claims) + 1, sent, claim, markers, resolved, ids))
+        if len(claims) >= max_claims:
+            warnings.append(f"Only the first {max_claims} cited sentences were read.")
+            break
+    if claims and not refs and not all(c.inline_ids for c in claims):
+        warnings.append("No reference list found (add a 'References' heading followed by the entries), so citations "
+                        "can only be checked when the sentence itself contains a DOI or arXiv id.")
+    style = "mixed" if numeric_seen and author_seen else "numeric" if numeric_seen else "author-year" if author_seen else "none"
+    return DraftParse(claims, refs, style, warnings)

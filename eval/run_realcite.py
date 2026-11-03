@@ -11,7 +11,7 @@ learned from the labels is learned on the tune half only and reported on the tes
 Systems, same verifier:
     baseline         whole cleaned citing sentence is the claim, no gate (the Session 5 audit)
     gated            + citation-context gate
-    gated_extracted  + gate + LLM claim extraction (src/claims.py), with --claim-extractor
+    gated_extracted  + gate + LLM claim extraction (src/claim_extraction.py), with --claim-extractor
 
 Gold labels: SUPPORT | PARTIAL | CONTRADICT | NEI | NOT_A_CLAIM, scored as 4 classes with NOT_A_CLAIM counted as NEI (a
 system that declines to judge a non-claim is right).  false-SUPPORT = predicted SUPPORT, gold anything else.
@@ -93,7 +93,7 @@ def predict(pipe, pairs, corpus_by_id):
 
 def relabel(preds, tau, margin=0.0):
     """Predictions at abstain threshold tau: per claim decide(), then the audit's aggregation."""
-    from src.claims import aggregate
+    from src.claim_extraction import aggregate
     from src.verdict import decide
 
     out = []
@@ -180,7 +180,7 @@ def main(argv=None):
     ap.add_argument("--out", default="eval/results")
     a = ap.parse_args(argv)
 
-    from src.claims import ClaimExtractor
+    from src.claim_extraction import ClaimExtractor
     from src.config import load_config
     from src.evidence import LexicalSentenceScorer
     from src.nli import build_verifier

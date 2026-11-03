@@ -1,6 +1,9 @@
 # MVP scope (for the Oct 6 mid-semester demo)
 
-Owner: Product (Vyom).  **Status: proposed by the Session 5 drop; Vyom edits and owns.**  Answers the Session 5 todo:
+> **Superseded after the midterm (2026-10-20).** This was the scope for the Oct 6 demo. The post-midterm scope (an agent
+> that finds papers and checks every citation in a draft, text-based PDFs only) is in `docs/agent_plan.md`.
+
+Owner: Product.  **Status: proposed in Session 5; owned by Product.**  Answers the Session 5 todo:
 "what's in, what's out."
 
 ## The one job

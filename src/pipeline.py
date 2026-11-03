@@ -18,7 +18,7 @@ from .config import Config, load_config
 from .evidence import LexicalSentenceScorer, build_sentence_scorer, score_claim_docs
 from .ingest import clean_context
 from .citation_gate import assess_context
-from .claims import aggregate
+from .claim_extraction import aggregate
 from .schema import NEI, SUPPORT, AuditRow, ClaimCheck, EvidenceItem, Hit, Paper, Reference, Verdict
 from .verdict import decide
 
@@ -90,7 +90,7 @@ class CiteCheckPipeline:
     def audit(self, references: Sequence, max_items: int = 10, progress: Optional[Callable] = None) -> list:
         """Check each cited paper against EVERY sentence that cites it.  EXPERIMENTAL: see eval/run_realcite.py.
 
-        With a claim extractor (src/claims.py) each citing sentence is first split into the claims it attributes to
+        With a claim extractor (src/claim_extraction.py) each citing sentence is first split into the claims it attributes to
         the cited paper; without one, the whole cleaned sentence is the claim (the Session 5 behaviour).
         """
         refs = list(references)[:max_items]
@@ -226,7 +226,7 @@ def build_pipeline(cfg: Optional[Config] = None, allow_fallback: bool = True) ->
     pipe.citation_gate, pipe.audit_tau = cfg.citation_gate, cfg.audit_tau
     meta["audit_tau"] = cfg.audit_tau
     if cfg.claim_extractor:  # loads lazily on the first audit; a failure falls back to whole sentences, with a warning
-        from .claims import ClaimExtractor
+        from .claim_extraction import ClaimExtractor
         from .reasoning import LocalLLM
 
         pipe.claim_extractor = ClaimExtractor(LocalLLM(cfg.claim_extractor), verifier=verifier)

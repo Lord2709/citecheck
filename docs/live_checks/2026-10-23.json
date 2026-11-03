@@ -1,0 +1,134 @@
+{
+  "run_at": "2026-10-23T12:40:24-04:00",
+  "platform": "Windows 10 / Python 3.9.2",
+  "keys": {
+    "openalex": false,
+    "s2": false,
+    "mailto": true
+  },
+  "papers": [
+    {
+      "probe": "doi-cs-nature",
+      "query": "10.1038/nature14539",
+      "why": "CS paper in a paywalled journal (Deep learning, Nature 2015)",
+      "ok": false,
+      "source": "",
+      "title": "",
+      "abstract_words": 0,
+      "looks_like_citation": false,
+      "error": "Found \u201cDeep learning\u201d but no abstract is available from open sources. Paste the abstract instead.",
+      "seconds": 0.72
+    },
+    {
+      "probe": "doi-biomed-oa",
+      "query": "10.1371/journal.pmed.0020124",
+      "why": "open-access biomedical paper (PLOS Medicine 2005)",
+      "ok": true,
+      "source": "openalex",
+      "title": "Why Most Published Research Findings Are False",
+      "abstract_words": 186,
+      "looks_like_citation": false,
+      "error": "",
+      "seconds": 0.19
+    },
+    {
+      "probe": "doi-biomed-nejm",
+      "query": "10.1056/NEJMoa2034577",
+      "why": "high-profile clinical trial (NEJM 2020); publisher abstracts are often missing",
+      "ok": true,
+      "source": "openalex",
+      "title": "Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine",
+      "abstract_words": 298,
+      "looks_like_citation": false,
+      "error": "",
+      "seconds": 0.12
+    },
+    {
+      "probe": "doi-scifact",
+      "query": "10.18653/v1/2020.emnlp-main.609",
+      "why": "returned a citation string instead of an abstract on 2026-09-29",
+      "ok": true,
+      "source": "s2",
+      "title": "Fact or Fiction: Verifying Scientific Claims",
+      "abstract_words": 128,
+      "looks_like_citation": false,
+      "error": "",
+      "seconds": 0.27
+    },
+    {
+      "probe": "arxiv-new",
+      "query": "arXiv:2004.14974",
+      "why": "new-style arXiv id (SciFact paper)",
+      "ok": true,
+      "source": "arxiv",
+      "title": "Fact or Fiction: Verifying Scientific Claims",
+      "abstract_words": 149,
+      "looks_like_citation": false,
+      "error": "",
+      "seconds": 0.16
+    },
+    {
+      "probe": "arxiv-transformer",
+      "query": "arXiv:1706.03762",
+      "why": "heavily cited CS preprint",
+      "ok": true,
+      "source": "arxiv",
+      "title": "Attention Is All You Need",
+      "abstract_words": 166,
+      "looks_like_citation": false,
+      "error": "",
+      "seconds": 0.09
+    }
+  ],
+  "references": {
+    "ok": true,
+    "n_references": 45,
+    "n_with_citing_sentence": 34,
+    "error": "",
+    "probe": "s2-references",
+    "query": "arXiv:2004.14974",
+    "seconds": 0.33
+  },
+  "planned": [
+    {
+      "probe": "crossref-resolve",
+      "url": "https://api.crossref.org/works",
+      "http": 200,
+      "ok": true,
+      "detail": "top DOI 10.18653/v1/2020.emnlp-main.609",
+      "seconds": 0.23
+    },
+    {
+      "probe": "europepmc-search",
+      "url": "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+      "http": 200,
+      "ok": true,
+      "detail": "hits=1, open_access=Y",
+      "seconds": 0.56
+    },
+    {
+      "probe": "openalex-search",
+      "url": "https://api.openalex.org/works",
+      "http": 200,
+      "ok": true,
+      "detail": "3 result(s)",
+      "seconds": 0.41
+    },
+    {
+      "probe": "s2-search",
+      "url": "https://api.semanticscholar.org/graph/v1/paper/search",
+      "http": 429,
+      "ok": false,
+      "detail": "HTTP 429",
+      "seconds": 0.08
+    },
+    {
+      "probe": "unpaywall-oa",
+      "url": "https://api.unpaywall.org/v2/10.1371/journal.pmed.0020124",
+      "http": 200,
+      "ok": true,
+      "detail": "is_oa=True, pdf=no",
+      "seconds": 0.12
+    }
+  ]
+}

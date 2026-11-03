@@ -97,7 +97,7 @@ def test_real_sentence_transformers_paths_with_tiny_models(docs, tmp_path):
     installed sentence-transformers version."""
     pytest.importorskip("torch")
     pytest.importorskip("sentence_transformers")
-    from tests.tiny_model import make_tiny_nli, make_tiny_sentence_transformer
+    from tiny_model import make_tiny_nli, make_tiny_sentence_transformer
 
     st_path = make_tiny_sentence_transformer(tmp_path / "st")
     dense = DenseRetriever(docs, model_name=st_path, cache_dir=str(tmp_path / "cache"), max_seq_length=64)

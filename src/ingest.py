@@ -1,8 +1,10 @@
 """Turn a DOI / arXiv id / link (or pasted text) into a Paper, and list a paper's references.
-Owner: Engineering (Sakshaat).
+Owner: Engineering.
 
-Sources (all free, no key required):
-  * OpenAlex             abstract (inverted index) + metadata by DOI
+Sources (all free):
+  * OpenAlex             abstract (inverted index) + metadata by DOI.  Since 2026 OpenAlex meters usage: without a key a
+                         small daily allowance, with a free key ($1/day of credit) single-work lookups like ours are free.
+                         Set OPENALEX_API_KEY to send the key (developers.openalex.org/api-reference/authentication).
   * arXiv export API     abstract by arXiv id
   * Semantic Scholar     fallback metadata + the reference list WITH citing sentences (`contexts`)
 
@@ -121,7 +123,8 @@ def paper_from_text(title: str, abstract: str) -> Paper:
 
 class Fetcher:
     def __init__(self, session=None, cache_dir="data/cache/ingest", mailto: Optional[str] = None,
-                 s2_api_key: Optional[str] = None, timeout: int = 15, retries: int = 3, sleep=time.sleep):
+                 s2_api_key: Optional[str] = None, openalex_api_key: Optional[str] = None,
+                 timeout: int = 15, retries: int = 3, sleep=time.sleep):
         if session is None:
             import requests
 
@@ -130,6 +133,7 @@ class Fetcher:
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.mailto = mailto or os.environ.get("CITECHECK_MAILTO")
         self.s2_key = s2_api_key or os.environ.get("S2_API_KEY")
+        self.openalex_key = openalex_api_key or os.environ.get("OPENALEX_API_KEY")
         self.timeout, self.retries, self._sleep = timeout, retries, sleep
 
     # ---- HTTP -----------------------------------------------------------------------------
@@ -168,8 +172,17 @@ class Fetcher:
         return self.cache_dir / (hashlib.sha1(f"{pid.kind}:{pid.value}".encode()).hexdigest()[:16] + ".json")
 
     # ---- sources --------------------------------------------------------------------------
+    def _openalex_params(self) -> Optional[dict]:
+        """Query parameters for OpenAlex: the API key (query parameter `api_key`) and the contact e-mail, if set."""
+        params = {}
+        if self.openalex_key:
+            params["api_key"] = self.openalex_key
+        if self.mailto:
+            params["mailto"] = self.mailto
+        return params or None
+
     def _openalex(self, doi: str) -> Optional[Paper]:
-        params = {"mailto": self.mailto} if self.mailto else None
+        params = self._openalex_params()
         r = self._get(f"https://api.openalex.org/works/https://doi.org/{doi}", params)
         if r is None:
             return None

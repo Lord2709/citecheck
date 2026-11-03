@@ -35,7 +35,7 @@ class Config:
     data_dir: str = "data/scifact"
     citation_gate: bool = True  # skip citing "sentences" that are not claims (src/citation_gate.py); audit only
     audit_tau: Optional[float] = None  # the audit's own abstain threshold, tuned by eval/run_realcite.py --tune-tau
-    claim_extractor: Optional[str] = None  # local LLM for the citation audit (src/claims.py); audit-only, experimental
+    claim_extractor: Optional[str] = None  # local LLM for the citation audit (src/claim_extraction.py); audit-only, experimental
     validated: bool = False
     deployed: Optional[dict] = None  # the raw deployed_config.json, when present
     overrides: list = field(default_factory=list)  # names of env vars that changed model behaviour

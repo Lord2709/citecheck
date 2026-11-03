@@ -1,10 +1,13 @@
-"""Fine-tune the NLI verifier on SciFact TRAIN.   Owner: Data & Evaluation (Sahil).   (STRETCH goal)
+"""Fine-tune the NLI verifier on SciFact TRAIN.   Owner: Data & Evaluation.   (STRETCH goal)
 
-    python -m eval.finetune_nli --out models/citecheck-nli-ft --epochs 3 --lr 1e-5 --batch-size 8
+    python -m eval.train_split                                    # once: makes data/splits/scifact_train_v1.json
+    python -m eval.finetune_nli --split-file data/splits/scifact_train_v1.json --pairs-only   # check the pairs, no torch
+    python -m eval.finetune_nli --split-file data/splits/scifact_train_v1.json --out models/citecheck-nli-ft --epochs 3 --lr 1e-5 --batch-size 8
     python -m eval.run_eval --name finetuned_nli --retriever bm25 --verifier nli --model models/citecheck-nli-ft \\
         --oracle --compare-with eval/results/zero_shot_nli
 
-What it trains on (train split only; dev/test are never read):
+What it trains on (train split only; dev/test are never read; with --split-file, only the FIT part of train, so the
+calibration part stays unseen for temperature scaling and threshold tuning):
   * positives : gold rationale sentences of each evidence paper -> SUPPORT / CONTRADICT
   * inference-style positives (--match-inference, on by default): the top-m sentences our own sentence
                 selector picks from the gold paper, when they include a rationale sentence.  At inference the
@@ -21,8 +24,10 @@ Evidence units (--unit; evaluate with the same run_eval --evidence-unit):
   * sentence : the verifier reads one sentence at a time and the paper takes its most decisive sentence
                (build_sentence_pairs; aggregation in src/evidence.aggregate_sentence_probs)
 
-Held-out claims: the train claims eval.run_eval tunes tau on (run_eval.tau_tuning_claims, same --tune-n and
---seed) are LEFT OUT of training.  They are used for per-epoch validation and the best epoch is kept, and
+Held-out claims: with --split-file (recommended; eval/train_split.py) the model trains on the fit part and the
+calib part is held out, which is where run_eval --tune-split-file ... --tune-part calib tunes tau.  Without it, the
+train claims eval.run_eval tunes tau on by default (run_eval.tau_tuning_claims, same --tune-n and --seed) are LEFT
+OUT of training.  They are used for per-epoch validation and the best epoch is kept, and
 run_eval refuses to tune tau on any claim the checkpoint was trained on.
 
 On a GPU, mixed precision is used automatically; --grad-accum and --gradient-checkpointing let a large
@@ -38,6 +43,7 @@ import time
 from pathlib import Path
 
 from eval.run_eval import tau_tuning_claims
+from eval.train_split import load_split, select_part
 from src.data_io import MIXED, find_scifact_dir, load_claims, load_corpus, sha256_file
 from src.evidence import build_premise, build_sentence_scorer, select_sentences
 from src.nli import DEFAULT_NLI_MODEL, resolve_label_indices
@@ -190,6 +196,55 @@ def pair_macro_f1(gold, pred):
     return sum(f1s) / len(f1s) if f1s else 0.0
 
 
+def split_claims(a, all_claims, train_path):
+    """-> (training claims, held-out claims, info).  With --split-file: train on its fit part, validate on its calib
+    part (the claims run_eval --tune-split-file ... --tune-part calib tunes tau on).  Without: hold out the claims
+    run_eval tunes tau on by default (run_eval.tau_tuning_claims, same --tune-n and --seed)."""
+    if a.split_file:
+        split = load_split(a.split_file)
+        claims = select_part(all_claims, split, a.part, train_path=train_path)
+        heldout = select_part(all_claims, split, "calib" if a.part == "fit" else "fit", train_path=train_path)
+        info = {"which": f"{a.part} part of {a.split_file}", "split_file": str(a.split_file), "part": a.part,
+                "split_sha256": split["source_sha256"][:16], "n_claims": len(claims)}
+    else:
+        heldout = tau_tuning_claims(all_claims, a.tune_n, a.seed) if a.tune_n > 0 else []
+        held = {c.id for c in heldout}
+        claims = [c for c in all_claims if c.id not in held]
+        info = {"which": f"train minus the {len(heldout)} tau-tuning claims (no split file)", "split_file": None,
+                "part": None, "n_claims": len(claims)}
+    if not claims:
+        raise SystemExit(f"no training claims left ({info['which']}); lower --tune-n or check --split-file.")
+    return claims, heldout, info
+
+
+def prepare_pairs(a):
+    """Load train, split it, build training and validation pairs.  Never opens dev or test."""
+    data_dir = find_scifact_dir(a.data_dir)
+    if data_dir is None:
+        raise SystemExit("SciFact not found. Run: python -m data.fetch_scifact")
+    corpus = load_corpus(data_dir / "corpus.jsonl")
+    by_id = {d.doc_id: d for d in corpus}
+    train_path = data_dir / "claims_train.jsonl"  # dev and test are deliberately never opened here
+    claims, heldout, info = split_claims(a, load_claims(train_path), train_path)
+    retriever = BM25Retriever(corpus)
+    scorer = build_sentence_scorer(a.sentence_scorer, corpus, **({} if a.sentence_scorer == "lexical" else {"device": a.device}))
+    build = dict(m=a.sentences, neg_per_claim=a.neg_per_claim, match_inference=a.match_inference,
+                 gold_doc_neutral=a.gold_doc_neutral, neutral_per_doc=a.neutral_per_doc)
+    builder = PAIR_BUILDERS[a.unit]
+    if a.unit == "window":
+        build.pop("neutral_per_doc")
+    pairs = builder(claims, by_id, retriever, scorer, **build)
+    val_pairs = builder(heldout, by_id, retriever, scorer, **build)
+    return pairs, val_pairs, info, train_path, {c.id for c in heldout}
+
+
+def export_pairs(pairs, path):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for premise, claim, label in pairs:
+            f.write(json.dumps({"premise": premise, "claim": claim, "label": label}) + "\n")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=DEFAULT_NLI_MODEL)
@@ -218,42 +273,32 @@ def main(argv=None):
     ap.add_argument("--no-amp", action="store_true", help="disable mixed precision on GPU")
     ap.add_argument("--seed", type=int, default=0, help="training seed AND the held-out sample (same as run_eval --seed)")
     ap.add_argument("--device", default=None)
+    ap.add_argument("--split-file", default=None,
+                    help="data/splits/scifact_train_v1.json from eval.train_split: train on its fit part only")
+    ap.add_argument("--part", default="fit", choices=["fit", "calib"], help="which part of the split to train on (fit!)")
+    ap.add_argument("--pairs-only", action="store_true", help="build the pairs, print counts, stop (no torch needed)")
+    ap.add_argument("--export-pairs", default=None,
+                    help="also write the pairs as JSONL (put it under data/cache/: it holds SciFact text, never commit it)")
     a = ap.parse_args(argv)
     a.max_length = a.max_length or MAX_LENGTH[a.unit]
+
+    random.seed(a.seed)
+    pairs, val_pairs, claims_info, train_path, heldout_ids = prepare_pairs(a)
+    counts = class_counts(pairs)
+    print(f"[unit={a.unit}, max_length={a.max_length}] {claims_info['n_claims']} training claims ({claims_info['which']}) "
+          f"-> {len(pairs)} pairs {counts}; {len(heldout_ids)} held-out claims -> {len(val_pairs)} validation pairs")
+    if a.export_pairs:
+        export_pairs(pairs, a.export_pairs)
+        print(f"[written] {a.export_pairs}")
+    if a.pairs_only:
+        return {"n_pairs": len(pairs), "class_counts": counts, "n_val_pairs": len(val_pairs), **claims_info}
 
     import numpy as np
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
-    random.seed(a.seed)
     np.random.seed(a.seed)
     torch.manual_seed(a.seed)
-
-    data_dir = find_scifact_dir(a.data_dir)
-    if data_dir is None:
-        raise SystemExit("SciFact not found. Run: python -m data.fetch_scifact")
-    corpus = load_corpus(data_dir / "corpus.jsonl")
-    by_id = {d.doc_id: d for d in corpus}
-    train_path = data_dir / "claims_train.jsonl"  # dev and test are deliberately never opened here
-    all_claims = load_claims(train_path)
-    heldout = tau_tuning_claims(all_claims, a.tune_n, a.seed) if a.tune_n > 0 else []
-    heldout_ids = {c.id for c in heldout}
-    claims = [c for c in all_claims if c.id not in heldout_ids]
-    if not claims:
-        raise SystemExit(f"--tune-n {a.tune_n} holds out all {len(all_claims)} train claims; lower it.")
-
-    retriever = BM25Retriever(corpus)
-    scorer = build_sentence_scorer(a.sentence_scorer, corpus, **({} if a.sentence_scorer == "lexical" else {"device": a.device}))
-    build = dict(m=a.sentences, neg_per_claim=a.neg_per_claim, match_inference=a.match_inference,
-                 gold_doc_neutral=a.gold_doc_neutral, neutral_per_doc=a.neutral_per_doc)
-    builder = PAIR_BUILDERS[a.unit]
-    if a.unit == "window":
-        build.pop("neutral_per_doc")
-    pairs = builder(claims, by_id, retriever, scorer, **build)
-    val_pairs = builder(heldout, by_id, retriever, scorer, **build)
-    counts = class_counts(pairs)
-    print(f"[unit={a.unit}, max_length={a.max_length}] {len(claims)} training claims -> {len(pairs)} pairs {counts}; "
-          f"{len(heldout)} held-out claims -> {len(val_pairs)} validation pairs")
 
     dev = a.device or ("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = dev.startswith("cuda") and not a.no_amp
@@ -337,11 +382,12 @@ def main(argv=None):
             break
 
     (out / "train_log.json").write_text(json.dumps({
-        "base": a.base, "args": vars(a), "n_train_claims": len(claims), "n_pairs": len(pairs), "class_counts": counts,
+        "base": a.base, "args": vars(a), "claims": claims_info, "n_train_claims": claims_info["n_claims"],
+        "n_pairs": len(pairs), "class_counts": counts,
         "n_val_pairs": len(val_pairs), "heldout_claim_ids": sorted(heldout_ids), "val_log": val_log, "best_epoch": best,
         "loss_log": log, "train_file_sha256": sha256_file(train_path)[:16], "seconds": time.time() - t0,
         "device": dev, "amp": str(amp_dtype) if use_amp else None,
-        "note": "trained on claims_train.jsonl minus heldout_claim_ids; evaluate with eval.run_eval on dev",
+        "note": "trained on the claims in `claims` (never heldout_claim_ids); evaluate with eval.run_eval on dev",
     }, indent=2), encoding="utf-8")
     print(f"[saved] {out} (best epoch {best['epoch']})")
 

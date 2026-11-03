@@ -27,3 +27,7 @@ evidence/**/raw_unredacted/
 
 # real citing sentences are Semantic Scholar text: collected locally, not redistributed (data/realcite/README.md)
 data/realcite/raw/
+
+# React site (rebuilt from web/ by npm)
+web/node_modules/
+web/dist/

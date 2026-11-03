@@ -1,4 +1,4 @@
-"""One command that produces every number we report.   Owner: Data & Evaluation (Sahil).
+"""One command that produces every number we report.   Owner: Data & Evaluation.
 
 Examples (run from the repo root):
 
@@ -413,6 +413,10 @@ def build_parser():
     p.add_argument("--tune-n", type=int, default=200, help="claims used to tune tau")
     p.add_argument("--tune-fs-cap", type=float, default=None,
                    help="tune tau as best macro-F1 with false-SUPPORT <= this on the tuning claims (safety-first)")
+    p.add_argument("--tune-split-file", default=None,
+                   help="data/splits/scifact_train_v1.json: tune tau only on one part of train (use with a fine-tuned model)")
+    p.add_argument("--tune-part", default="calib", choices=["fit", "calib"],
+                   help="part of --tune-split-file to tune on; calib keeps tau off the claims the model was trained on")
     p.add_argument("--allow-leak", action="store_true", help="allow tuning on the evaluation split (recorded in results)")
     p.add_argument("--oracle", action="store_true", help="also run oracle-paper and oracle-rationale ablations")
     p.add_argument("--compare-with", action="append", default=[], help="results dir of another run (paired bootstrap)")
@@ -489,14 +493,29 @@ def run(args) -> dict:
         if args.tune_split == args.split and not args.allow_leak:
             sys.exit("Refusing to tune tau on the split you report on. Use --tune-split train (default) or --allow-leak.")
         tune_path = data_dir / f"claims_{args.tune_split}.jsonl"
-        tune_claims = tau_tuning_claims(load_claims(tune_path), args.tune_n, args.seed)
+        tune_claims = load_claims(tune_path)
+        split_info = None
+        if args.tune_split_file:
+            if args.tune_split != "train":
+                sys.exit("--tune-split-file splits TRAIN; use it with --tune-split train.")
+            from eval.train_split import load_split, select_part
+
+            split = load_split(args.tune_split_file)
+            try:
+                tune_claims = select_part(tune_claims, split, args.tune_part, train_path=tune_path)
+            except ValueError as e:
+                sys.exit(f"--tune-split-file: {e}")
+            split_info = {"split_file": str(args.tune_split_file), "part": args.tune_part,
+                          "split_sha256": split["source_sha256"][:16]}
+        tune_claims = tau_tuning_claims(tune_claims, args.tune_n, args.seed)
         if args.limit:
             tune_claims = tune_claims[: args.limit]
         n_trained_on = 0
         model_path = spec[4:] if spec.lower().startswith("nli:") else None
         if args.tune_split == "train" and model_path:
             n_trained_on = check_tuning_claims_held_out(model_path, tune_claims, args.allow_leak)
-        tune_out = get(f"tune-{args.tune_split}", tune_claims, "e2e")["outputs"]
+        tune_name = f"tune-{args.tune_split}" + (f"-{args.tune_part}-{split_info['split_sha256']}" if split_info else "")
+        tune_out = get(tune_name, tune_claims, "e2e")["outputs"]  # distinct cache key per split part
         best = tune_tau(tune_out, args.margin, args.tune_fs_cap)
         tau = best["tau"]
         tuning = {
@@ -506,6 +525,8 @@ def run(args) -> dict:
             "leak": args.tune_split == args.split or n_trained_on > 0,
             "n_tuning_claims_seen_in_finetuning": n_trained_on,
         }
+        if split_info:
+            tuning.update(split_info)
 
     # ---- end-to-end ------------------------------------------------------------------------
     e2e = get(args.split, claims, "e2e")

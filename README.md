@@ -7,6 +7,9 @@ A paper-judging tool for researchers. Submit a paper (link or DOI) along with a 
 
 PDF upload is a possible future input method, still deciding on OCR handling.
 
+**Live site:** https://citecheck-877770798089.us-east4.run.app (sign in with an e-mailed code). Hosting and
+updates: `deploy/GCP.md`; Supabase and e-mail setup: `deploy/WEB.md`.
+
 ## Who this is for
 
 Students and researchers who read and cite papers weekly. Today they either skim abstracts and guess, or read full papers to check relevance, and when writing their own work, they cite sources without an easy way to verify the cited paper actually supports the claim it's attached to.
@@ -81,4 +84,4 @@ One issue and one branch per task; a teammate approves every PR; no direct pushe
 
 ## Status
 
-Early stage. Problem statement and team roles are set. The end-to-end pipeline, app and evaluation harness are in place; see `eval/results/LATEST.md` for what has actually been measured and `reports/` for the current weekly state. Not yet deployed for strangers (planned for Session 7).
+Early stage. Problem statement and team roles are set. The end-to-end pipeline, app and evaluation harness are in place; see `eval/results/LATEST.md` for what has actually been measured and `reports/` for the current weekly state. Deployed for testing at https://citecheck-877770798089.us-east4.run.app since Oct 26 (Google Cloud Run, free trial; see `deploy/GCP.md`).

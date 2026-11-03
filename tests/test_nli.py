@@ -50,7 +50,7 @@ def test_real_transformer_plumbing_with_tiny_model(tmp_path, id2label):
     import torch
 
     from src.nli import NLIVerifier
-    from tests.tiny_model import make_tiny_nli
+    from tiny_model import make_tiny_nli
 
     path = make_tiny_nli(tmp_path / "m", id2label)
     pairs = [("zorvex increased bone density in mice", "zorvex increases bone density"),
