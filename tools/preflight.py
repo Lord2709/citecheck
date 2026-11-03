@@ -178,11 +178,14 @@ def run_checks(root: Path, session: int, use_gh: bool = False, deadline: datetim
 
     # ---- 6. numbers come from a real run ---------------------------------------------------------
     runs = load_runs(root)
-    real = [r for r in runs if not r["synthetic_fixture"] and not r["partial"]]
+    # only claim-level eval runs count; other result folders (the real-citation audit) carry neither the flags nor an F1
+    real = [r for r in runs if r.get("claim_level") and not r.get("synthetic_fixture", True) and not r.get("partial", True)]
     if fm.get("north_star") and re.search(r"\d", str(fm["north_star"].get("value", ""))):
         vals = _floats(str(fm["north_star"]["value"]))
-        def near(r):  # report may round to 2-3 decimals
-            f1 = r["claim_level"]["macro_f1"]
+        def near(r):  # report may round to 2-3 decimals; runs without claim-level F1 (e.g. the E3 agent run) never match
+            f1 = (r.get("claim_level") or {}).get("macro_f1")
+            if f1 is None:
+                return False
             return any(abs(v - f1) <= 0.0051 or abs(v / 100 - f1) <= 0.0051 for v in vals)
         if any(near(r) for r in real):
             add("north_star value matches a real eval run", "PASS", next(r["name"] for r in real if near(r)))
