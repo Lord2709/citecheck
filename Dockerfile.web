@@ -27,9 +27,11 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0 \
 COPY --chown=user . .
 COPY --chown=user --from=web /web/dist ./web/dist
 USER user
-# Bake the data and the verifier model into the image so the site starts fast.
+# Bake the data and the promoted models (eval/results/deployed_config.json: the verifier and the sentence selector)
+# into the image, so the site starts fast and never falls back to the demo backend: the build fails if either model
+# cannot be loaded.
 RUN python -m data.fetch_scifact \
- && python -c "from src.nli import build_verifier; build_verifier('nli')._load()"
+ && python -c "from src.pipeline import build_pipeline; build_pipeline(allow_fallback=False)"
 
 EXPOSE 7860
 CMD ["uvicorn", "--factory", "api.main:create_app", "--host", "0.0.0.0", "--port", "7860", "--proxy-headers"]

@@ -14,8 +14,8 @@ export default function About() {
       </ol>
 
       <h2>How well it does</h2>
-      <p>On SciFact, a benchmark of 300 expert-written biomedical claims, the model scores a macro-F1 of 0.60 (95% CI 0.55–0.66) and wrongly says “supported” for 11% of claims that aren't supported. In a test where each claim cites a wrong but plausible paper, CiteCheck flagged 91% of the wrong citations.</p>
-      <p>It is cautious: it would rather say “not enough evidence” than guess. With today's model, it also raises a concern about roughly half of the citations that are in fact correct. We are working on that.</p>
+      <p>On SciFact, a benchmark of 300 expert-written biomedical claims, CiteCheck's model scores a macro-F1 of 0.74 (95% CI 0.68–0.78) and wrongly says “supported” for 9% of claims that aren't supported. The off-the-shelf model it replaced scored 0.60 and 11%. We picked this model among several versions tried on the same claims, so its true score is probably a little lower.</p>
+      <p>It is cautious: it would rather say “not enough evidence” than guess. The previous model raised a concern about roughly half of the citations that were in fact correct; we are measuring this again for the new one.</p>
 
       <h2>Your data</h2>
       <ul>
@@ -26,7 +26,7 @@ export default function About() {
       </ul>
 
       <h2>Data and models</h2>
-      <p>Evaluation data: SciFact (claims CC BY 4.0, abstracts ODC-By 1.0). Paper metadata: OpenAlex, Semantic Scholar, arXiv, Crossref, Europe PMC and Unpaywall. Verifier: an open-source DeBERTa natural-language-inference model.</p>
+      <p>Evaluation data: SciFact (claims CC BY 4.0, abstracts ODC-By 1.0). Paper metadata: OpenAlex, Semantic Scholar, arXiv, Crossref, Europe PMC and Unpaywall. Verifier: an open-source DeBERTa natural-language-inference model, fine-tuned by the team on SciFact's training claims, with a second fine-tuned model that picks the evidence sentences.</p>
     </div>
   );
 }
