@@ -1,0 +1,55 @@
+code,run,kind,status,time_et,seconds,input,papers_found,cit,verdict,confidence,cit_status,full_text,paper
+U01,2f2bc71f,draft_check,done,2026-10-26 14:43:13,47,text,,1,SUPPORT,0.9953,checked,false,Attention Is All You Need
+U01,2f2bc71f,draft_check,done,2026-10-26 14:43:13,47,text,,2,SUPPORT,0.9963,checked,false,Fact or Fiction: Verifying Scientific Claims
+U01,2f2bc71f,draft_check,done,2026-10-26 14:43:13,47,text,,3,,,no_abstract,false,
+U01,2f2bc71f,draft_check,done,2026-10-26 14:43:13,47,text,,4,CONTRADICT,0.9974,checked,false,Attention Is All You Need
+U01,2f2bc71f,draft_check,done,2026-10-26 14:43:13,47,text,,5,NEI,0.9278,checked,true,Attention Is All You Need
+U01,88e557f6,discovery,done,2026-11-03 14:43:39,15,,4,,,,,,
+U01,c5780f16,discovery,done,2026-11-03 14:44:55,15,,4,,,,,,
+U01,41b3805d,discovery,done,2026-11-03 14:50:36,15,,14,,,,,,
+U01,2b0ea7e3,draft_check,done,2026-11-03 15:08:18,56,text,,1,SUPPORT,0.9953,checked,false,Attention Is All You Need
+U01,2b0ea7e3,draft_check,done,2026-11-03 15:08:18,56,text,,2,SUPPORT,0.9941,checked,true,10.18653/v1/2020.emnlp-main.609
+U01,2b0ea7e3,draft_check,done,2026-11-03 15:08:18,56,text,,3,,,no_abstract,false,
+U01,2b0ea7e3,draft_check,done,2026-11-03 15:08:18,56,text,,4,CONTRADICT,0.9974,checked,false,Attention Is All You Need
+U01,2b0ea7e3,draft_check,done,2026-11-03 15:08:18,56,text,,5,NEI,0.9278,checked,true,Attention Is All You Need
+U01,bbc7c2b3,draft_check,done,2026-11-03 15:11:53,132,text,,1,SUPPORT,0.9475,checked,false,Brain age predicts mortality
+U01,bbc7c2b3,draft_check,done,2026-11-03 15:11:53,132,text,,2,SUPPORT,0.9965,checked,false,Organ aging signatures in the plasma proteome track health and disease
+U01,bbc7c2b3,draft_check,done,2026-11-03 15:11:53,132,text,,3,SUPPORT,0.6381,checked,true,Heterogeneous aging across multiple organ systems and prediction of chronic disease and mortality
+U01,bbc7c2b3,draft_check,done,2026-11-03 15:11:53,132,text,,4,NEI,0.9943,checked,true,UK Biobank: An Open Access Resource for Identifying the Causes of a Wide Range of Complex Diseases of Middle and Old Age
+U01,bbc7c2b3,draft_check,done,2026-11-03 15:11:53,132,text,,5,NEI,0.9996,checked,false,Regression Models and Life-Tables
+U01,bbc7c2b3,draft_check,done,2026-11-03 15:11:53,132,text,,6,NEI,0.9808,checked,true,Large language models encode clinical knowledge
+U01,bbc7c2b3,draft_check,done,2026-11-03 15:11:53,132,text,,7,CONTRADICT,0.9851,checked,false,Ten Years of BrainAGE as a Neuroimaging Biomarker of Brain Aging: What Insights Have We Gained?
+U01,bbc7c2b3,draft_check,done,2026-11-03 15:11:53,132,text,,8,NEI,0.9997,checked,false,Regression Models and Life-Tables
+U01,4aec9d63,draft_check,done,2026-11-03 16:01:02,44,text,,1,SUPPORT,0.9987,checked,false,Attention Is All You Need
+U01,4aec9d63,draft_check,done,2026-11-03 16:01:02,44,text,,2,SUPPORT,0.9976,checked,false,Fact or Fiction: Verifying Scientific Claims
+U01,4aec9d63,draft_check,done,2026-11-03 16:01:02,44,text,,3,,,no_abstract,false,
+U01,4aec9d63,draft_check,done,2026-11-03 16:01:02,44,text,,4,CONTRADICT,0.996,checked,false,Attention Is All You Need
+U01,4aec9d63,draft_check,done,2026-11-03 16:01:02,44,text,,5,SUPPORT,0.8149,checked,true,Attention Is All You Need
+U02,581c1767,draft_check,done,2026-11-04 18:10:22,0,text,,1,,,unresolved,false,
+U02,581c1767,draft_check,done,2026-11-04 18:10:22,0,text,,2,,,unresolved,false,
+U02,581c1767,draft_check,done,2026-11-04 18:10:22,0,text,,3,,,unresolved,false,
+U02,581c1767,draft_check,done,2026-11-04 18:10:22,0,text,,4,,,unresolved,false,
+U02,581c1767,draft_check,done,2026-11-04 18:10:22,0,text,,5,,,unresolved,false,
+U02,581c1767,draft_check,done,2026-11-04 18:10:22,0,text,,6,,,unresolved,false,
+U02,cdb67269,draft_check,done,2026-11-04 18:10:28,0,text,,1,,,unresolved,false,
+U02,cdb67269,draft_check,done,2026-11-04 18:10:28,0,text,,2,,,unresolved,false,
+U02,cdb67269,draft_check,done,2026-11-04 18:10:28,0,text,,3,,,unresolved,false,
+U02,cdb67269,draft_check,done,2026-11-04 18:10:28,0,text,,4,,,unresolved,false,
+U02,cdb67269,draft_check,done,2026-11-04 18:10:28,0,text,,5,,,unresolved,false,
+U02,cdb67269,draft_check,done,2026-11-04 18:10:28,0,text,,6,,,unresolved,false,
+U02,4e67506a,draft_check,done,2026-11-04 18:10:49,60,text,,1,SUPPORT,0.9926,checked,true,Deep Learning Based Vulnerability Detection: Are We There Yet?
+U02,4e67506a,draft_check,done,2026-11-04 18:10:49,60,text,,2,,,unresolved,false,
+U02,4e67506a,draft_check,done,2026-11-04 18:10:49,60,text,,3,,,unresolved,false,
+U02,4e67506a,draft_check,done,2026-11-04 18:10:49,60,text,,4,NEI,0.9747,checked,true,Automated Vulnerability Detection in Source Code Using Deep Representation Learning
+U02,4e67506a,draft_check,done,2026-11-04 18:10:49,60,text,,5,,,unresolved,false,
+U02,8e79c605,discovery,done,2026-11-04 18:13:35,17,,10,,,,,,
+U02,a463c9ec,discovery,done,2026-11-04 18:14:05,17,,0,,,,,,
+U02,862913ea,discovery,done,2026-11-04 18:15:58,21,,10,,,,,,
+U03,fa4e2bea,draft_check,done,2026-11-10 14:33:59,101,text,,1,NEI,0.5611,checked,false,MeshAgent: Enabling Reliable Network Management with Large Language Models
+U03,fa4e2bea,draft_check,done,2026-11-10 14:33:59,101,text,,2,SUPPORT,0.502,checked,false,Intent-Driven Network Management with Multi-Agent LLMs: The Confucius Framework
+U03,fa4e2bea,draft_check,done,2026-11-10 14:33:59,101,text,,3,NEI,0.9962,checked,false,Mininet-AI: Emulating Network Agentic AI
+U03,fa4e2bea,draft_check,done,2026-11-10 14:33:59,101,text,,4,CONTRADICT,0.9935,checked,false,MeshAgent: Enabling Reliable Network Management with Large Language Models
+U03,fa4e2bea,draft_check,done,2026-11-10 14:33:59,101,text,,5,NEI,0.9986,checked,false,Intent-Driven Network Management with Multi-Agent LLMs: The Confucius Framework
+U03,fa4e2bea,draft_check,done,2026-11-10 14:33:59,101,text,,6,NEI,0.9969,checked,false,Mininet-AI: Emulating Network Agentic AI
+U03,eb1c6dcd,discovery,done,2026-11-10 14:40:55,15,,0,,,,,,
+U03,2999b622,discovery,done,2026-11-10 14:42:27,15,,10,,,,,,
