@@ -151,3 +151,44 @@ def test_author_year_markers_are_shown_as_written():
     assert rep.citations[0].marker == "(Doe et al., 2021)" and rep.citations[0].verdict.label == SUPPORT
     missing = agent().check_draft("Statins lower cholesterol in most adults (Roe, 2019).\n\nReferences\n[1] Other.\n")
     assert missing.citations[0].marker == "(Roe, 2019)" and "no entry for (Roe, 2019)" in missing.citations[0].status_detail
+
+
+def test_a_pasted_passage_is_judged_on_its_own():
+    from src.agent import CiteCheckAgent
+
+    class Finder:
+        calls = 0
+
+        def find(self, paper):
+            Finder.calls += 1
+            return None
+
+    agent = CiteCheckAgent(make_pipeline(), fetcher=None, fulltext=Finder())
+    cit = {"index": 1, "sentence": "X [1].", "claim": "Zorvex cures baldness in adult mice.", "marker": "[1]",
+           "status": "checked", "paper": {"title": "Zorvex and bone", "doi": "10.1000/zorvex"}, "steps": []}
+    out = agent.recheck_with_abstract(cit, "", "Zorvex was studied in rats.", kind="passage")
+    assert out["verdict"]["label"] == "NEI" and Finder.calls == 0 and out["full_text_status"] == "pasted"
+
+
+def test_a_refused_free_copy_is_offered_to_the_researcher():
+    from src.agent import CiteCheckAgent
+
+    class Finder:
+        last_detail, last_free_url = "", ""
+
+        def find(self, paper):
+            self.last_detail = "Unpaywall PDF: dl.acm.org refused the download (HTTP 403)"
+            self.last_free_url = "https://dl.acm.org/doi/pdf/9"
+            return None
+
+    agent = CiteCheckAgent(make_pipeline(), fetcher=None, fulltext=Finder())
+    v, read_ft, _, _, steps = agent.check_claim("Zorvex cures baldness.", paper("doi:10.1145/9", "T", "Zorvex was studied."))
+    assert v.label == NEI and not read_ft and ("free copy", "https://dl.acm.org/doi/pdf/9") in [(s.action, s.detail) for s in steps]
+    rep = {"kind": "draft_check", "citations": [{"index": 1, "marker": "[1]", "sentence": "S [1].", "claim": "Zorvex cures baldness.",
+                                                 "status": "checked", "paper": {"title": "T"}, "read_full_text": False,
+                                                 "verdict": {"label": "NEI", "display_label": "NOT ENOUGH EVIDENCE",
+                                                             "confidence": 0.9, "evidence": []}, "suggestions": [],
+                                                 "steps": [{"action": s.action, "detail": s.detail} for s in steps]}]}
+    assert summarize(rep)["free_copy_refused"] == 1
+    md = to_markdown(rep)
+    assert "## 1. Not in the abstract" in md and "website refused our download. Open it (https://dl.acm.org/doi/pdf/9)" in md

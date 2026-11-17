@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { post } from "../api";
-import { conf, outcome, OUTCOME_CLASS, STEP_LABEL } from "../format";
-import { track } from "../track";
+import { abstractOnly, conf, displayOutcome, freeCopyUrl, noFreeFullText, outcome, OUTCOME_CLASS, STEP_LABEL } from "../format";
 import type { Citation, Summary } from "../types";
+import Judgement from "./Judgement";
 
 interface Props {
   c: Citation;
@@ -28,35 +28,29 @@ function Sentence({ text, marker }: { text: string; marker: string }) {
 export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }: Props) {
   const o = outcome(c);
   const [open, setOpen] = useState(defaultOpen || o !== "Supported");
-  const [vote, setVote] = useState<null | boolean>(null);
-  const [comment, setComment] = useState("");
-  const [sent, setSent] = useState(false);
   const [abstract, setAbstract] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const v = c.verdict;
-  const canPaste = !!runId && c.status !== "checked" && (c.status === "no_abstract" || /abstract/i.test(c.status_detail));
-
-  async function sendFeedback(agrees: boolean, withComment = false) {
-    setVote(agrees);
-    if (agrees || withComment) {
-      await post("/api/feedback", { run_id: runId ?? null, citation_index: c.index, agrees, comment: withComment ? comment : "" })
-        .catch(() => undefined);
-      setSent(true);
-      track("feedback", { agrees, citation: c.index, with_comment: withComment && !!comment.trim() });
-    }
-  }
+  const onlyAbstract = abstractOnly(c) && noFreeFullText(c);
+  const freeCopy = freeCopyUrl(c);
+  const citesNumber = /\d/.test(c.claim);
+  // No abstract: paste the abstract.  A verdict from the abstract alone that is not "supported": paste the passage of
+  // the paper that backs the sentence (the researcher often has the paper through their library).
+  const pasteKind: "abstract" | "passage" | null = !runId ? null
+    : c.status !== "checked" ? (c.status === "no_abstract" || /abstract/i.test(c.status_detail) ? "abstract" : null)
+    : v && abstractOnly(c) && v.label !== "SUPPORT" ? "passage" : null;
 
   async function recheck() {
     if (!abstract.trim()) {
-      setErr("Paste the abstract first.");
+      setErr(pasteKind === "passage" ? "Paste the passage first." : "Paste the abstract first.");
       return;
     }
     setBusy(true);
     setErr("");
     try {
       const r = await post<{ citation: Citation; summary: Summary }>("/api/recheck", {
-        run_id: runId, citation_index: c.index, title: c.paper?.title ?? "", abstract,
+        run_id: runId, citation_index: c.index, title: c.paper?.title ?? "", abstract, kind: pasteKind ?? "abstract",
       });
       onUpdate?.(r.citation, r.summary);
     } catch (e) {
@@ -69,7 +63,7 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
   return (
     <article className={`card cite ${OUTCOME_CLASS[o]}`}>
       <button className="cite-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className={`pill ${OUTCOME_CLASS[o]}`}>{o}</span>
+        <span className={`pill ${OUTCOME_CLASS[o]}`}>{displayOutcome(c)}</span>
         <span className="cite-marker">{c.marker || "claim"}</span>
         <span className="cite-claim">{c.claim}</span>
         {v && <span className="cite-conf" title="Model confidence (not calibrated yet)">{conf(v.confidence)}</span>}
@@ -90,7 +84,9 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
                 <p>
                   {c.paper.url ? <a href={c.paper.url} target="_blank" rel="noreferrer">{c.paper.title}</a> : c.paper.title}
                   {c.paper.year ? <span className="muted"> · {c.paper.year}</span> : null}
-                  {c.abstract_pasted ? <span className="tag">abstract you pasted</span> : c.read_full_text ? <span className="tag">open-access full text</span> : <span className="tag">abstract</span>}
+                  {c.abstract_pasted ? <span className="tag">{c.pasted_kind === "passage" ? "passage you pasted" : "abstract you pasted"}</span>
+                    : c.read_full_text ? <span className="tag">open-access full text</span>
+                    : <span className="tag">{onlyAbstract ? "abstract only" : "abstract"}</span>}
                 </p>
               ) : (
                 <p className="muted">{c.reference_text}</p>
@@ -104,9 +100,22 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
                 {o === "Supported" ? "Sentences that support it" : o === "Contradicted" ? "Sentences that conflict with it" : "Closest sentences we found"}
               </div>
               {(v.evidence[0]?.sentences ?? []).map((s, i) => <blockquote key={i} className="evidence">{s}</blockquote>)}
-              {o === "Not enough evidence" && (
+              {onlyAbstract ? (
+                <p className="hint abstract-only">
+                  {c.full_text_status === "off"
+                    ? <><strong>Only the abstract was read:</strong> full-text reading was switched off for this check.</>
+                    : freeCopy
+                      ? <><strong>Only the abstract could be read:</strong> a free copy of this paper exists, but its website refused
+                          our download. <a href={freeCopy} target="_blank" rel="noreferrer">Open the free copy</a> and paste the
+                          passage that backs your sentence below.</>
+                      : <><strong>Only the abstract could be read:</strong> no free full text of this paper was found.</>}
+                  {o === "Not enough evidence" ? " Numbers, methods and detailed results are usually only in the full paper, so this does not mean your sentence is wrong."
+                    : freeCopy ? "" : " The full paper may say more."}
+                  {o === "Not enough evidence" && citesNumber ? " Your sentence cites a number; abstracts rarely include them." : ""}
+                </p>
+              ) : o === "Not enough evidence" && (
                 <p className="hint">
-                  The {c.read_full_text ? "paper" : "abstract"} doesn't clearly say this either way. That does not mean your sentence is wrong.
+                  The {c.read_full_text ? "paper" : c.abstract_pasted ? "text you pasted" : "abstract"} doesn't clearly say this either way. That does not mean your sentence is wrong.
                 </p>
               )}
             </div>
@@ -114,16 +123,28 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
             <div className="field">
               <div className="field-label">Why we couldn't check it</div>
               <p>{sentenceCase(c.status_detail) || "We could not find this paper."}</p>
+              {freeCopy && (
+                <p className="hint">
+                  A free copy exists, but its website refused our download: <a href={freeCopy} target="_blank" rel="noreferrer">open
+                  it</a> and paste its abstract, or the passage that backs your sentence, below.
+                </p>
+              )}
             </div>
           )}
 
-          {canPaste && (
+          {pasteKind && (
             <div className="field paste">
-              <div className="field-label">Have the abstract? Paste it and we'll check against it</div>
-              <textarea value={abstract} onChange={(e) => setAbstract(e.target.value)} rows={4}
-                        placeholder="Paste the paper's abstract here" aria-label="Abstract" />
+              <div className="field-label">
+                {pasteKind === "passage" ? "Have the paper? Paste the passage that backs your sentence, and we'll check against it"
+                  : "Have the paper? Paste its abstract, or the passage that backs your sentence, and we'll check against it"}
+              </div>
+              <textarea value={abstract} onChange={(e) => setAbstract(e.target.value)} rows={4} maxLength={20000}
+                        placeholder={pasteKind === "passage" ? "Paste the paragraph or table caption from the paper" : "Paste the paper's abstract or a passage here"}
+                        aria-label={pasteKind === "passage" ? "Passage from the paper" : "Abstract"} />
               {err && <p className="error">{err}</p>}
-              <button className="btn" onClick={recheck} disabled={busy}>{busy ? "Checking…" : "Check with this abstract"}</button>
+              <button className="btn" onClick={recheck} disabled={busy}>
+                {busy ? "Checking…" : pasteKind === "passage" ? "Check with this passage" : "Check with this text"}
+              </button>
             </div>
           )}
 
@@ -153,23 +174,7 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
             </details>
           )}
 
-          <div className="feedback">
-            {sent ? (
-              <span className="muted">Thanks, noted.</span>
-            ) : vote === false ? (
-              <div className="feedback-form">
-                <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="What looks wrong? (optional)"
-                       aria-label="What looks wrong" />
-                <button className="btn btn-small" onClick={() => sendFeedback(false, true)}>Send</button>
-              </div>
-            ) : (
-              <>
-                <span className="muted">Does this look right?</span>
-                <button className="chip" onClick={() => sendFeedback(true)}>👍 Yes</button>
-                <button className="chip" onClick={() => setVote(false)}>👎 No</button>
-              </>
-            )}
-          </div>
+          {v && runId && <Judgement runId={runId} index={c.index} verdict={v.label} />}
         </div>
       )}
     </article>

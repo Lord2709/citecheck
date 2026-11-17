@@ -7,7 +7,9 @@ Citation styles handled (rule-based; covers the common cases, not every style gu
   numeric      ... reduces infection [3].   [3, 5]   [4-6]   [4–6]
   author-year  ... reduces infection (Smith et al., 2019; Lee and Park, 2020).   Smith et al. (2019) showed ...
   inline id    ... (doi:10.1038/nature14539)   arXiv:2004.14974
-Reference list: everything after a heading line "References", "Bibliography", "Works cited" or "Literature cited".
+Reference list: everything after a heading line "References", "Bibliography", "Works cited" or "Literature cited";
+without a heading, a run of lines at the end of the text that look like reference entries; or the website's separate
+reference-list box (`join_references`).
 Entries: "[1] ...", "1. ...", "1) ..." (numeric), or one entry per line / paragraph (author-year).
 """
 from __future__ import annotations
@@ -27,6 +29,10 @@ NARRATIVE = re.compile(r"\b([A-Z][A-Za-z\-'’]+)(?:\s+et\s+al\.?|\s+(?:and|&)\s
 YEAR = re.compile(r"\b((?:19|20)\d{2})[a-z]?\b")
 NUM_ENTRY = re.compile(r"^\s*(?:\[(\d+)\]|(\d+)[.)])\s+(.*)$")
 MAX_RANGE = 30
+# An author-year entry starts "Surname, A." / "Surname, Anne" / "Surname A," and contains a year.
+AUTHOR_ENTRY = re.compile(r"^\s*[A-Z][A-Za-z\-'’]+,?\s+(?:[A-Z]\.|[A-Z][a-z]+,|[A-Z]{1,3}[,.])")
+ID_IN_LINE = re.compile(r"\b10\.\d{4,9}/|arxiv:?\s*\d{4}\.\d{4,5}|https?://", re.I)
+MIN_TAIL_ENTRIES = 2
 
 
 @dataclass
@@ -60,13 +66,61 @@ def _surname_key(surname: str, year: str) -> str:
     return re.sub(r"[^a-z]", "", surname.lower()) + year
 
 
+def _looks_like_entry(line: str) -> bool:
+    t = line.strip()
+    if not t or NUMERIC.search(t[3:]):            # a citing sentence carries markers after its start
+        return False
+    if NUM_ENTRY.match(t):
+        return True
+    return bool((AUTHOR_ENTRY.match(t) and YEAR.search(t)) or (ID_IN_LINE.search(t) and YEAR.search(t)))
+
+
+def _unlabelled_tail(text: str):
+    """Start offset of a reference list pasted without a heading: entry-like lines at the end of the text (with up to
+    two wrapped continuation lines between them), at least MIN_TAIL_ENTRIES of them.  None if there is none."""
+    lines = text.splitlines(keepends=True)
+    offsets, pos = [], 0
+    for line in lines:
+        offsets.append(pos)
+        pos += len(line)
+    start, entries, run = None, 0, 0
+    for i in reversed(range(len(lines))):
+        line = lines[i].strip()
+        if not line:
+            continue
+        if _looks_like_entry(line):
+            entries, start, run = entries + 1, offsets[i], 0
+            continue
+        run += 1
+        if run > 2 or NUMERIC.search(line) or len(line.split()) > 40:
+            break                                   # body text: a citing sentence or a paragraph
+    return start if entries >= MIN_TAIL_ENTRIES and start else None
+
+
 def split_body_and_references(text: str):
-    """(body, reference_block).  The LAST matching heading wins (a paper may mention 'references' earlier)."""
-    matches = list(REF_HEADING.finditer(text or ""))
-    if not matches:
-        return text or "", ""
-    m = matches[-1]
-    return text[: m.start()], text[m.end():]
+    """(body, reference_block).  The LAST matching heading wins (a paper may mention 'references' earlier); without a
+    heading, an entry-like block at the end of the text is taken as the reference list."""
+    text = text or ""
+    matches = list(REF_HEADING.finditer(text))
+    if matches:
+        m = matches[-1]
+        return text[: m.start()], text[m.end():]
+    tail = _unlabelled_tail(text)
+    if tail is not None:
+        return text[:tail], text[tail:]
+    return text, ""
+
+
+def join_references(text: str, references: str) -> str:
+    """The draft as one text when the reference list comes from its own box.  If the text already has a reference
+    list after a heading, the box's entries are added to it; otherwise a heading is added."""
+    references = (references or "").strip()
+    if not references:
+        return text or ""
+    text = (text or "").rstrip()
+    if REF_HEADING.search(text):
+        return f"{text}\n{references}\n"
+    return f"{text}\n\nReferences\n{references}\n"
 
 
 def parse_reference_list(block: str) -> dict:
@@ -195,7 +249,8 @@ def parse_draft(text: str, max_claims: int = 200) -> DraftParse:
             warnings.append(f"Only the first {max_claims} cited sentences were read.")
             break
     if claims and not refs and not all(c.inline_ids for c in claims):
-        warnings.append("No reference list found (add a 'References' heading followed by the entries), so citations "
-                        "can only be checked when the sentence itself contains a DOI or arXiv id.")
+        warnings.append("No reference list found. Paste it in the reference-list box (or after a line that says "
+                        "'References'), so citations can be matched to papers; until then only a citation with a DOI "
+                        "or arXiv id in the sentence itself can be checked.")
     style = "mixed" if numeric_seen and author_seen else "numeric" if numeric_seen else "author-year" if author_seen else "none"
     return DraftParse(claims, refs, style, warnings)

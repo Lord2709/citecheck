@@ -38,6 +38,16 @@ export default function Results({ citations, summary, warnings = [], runId, done
         ))}
       </div>
       {warnings.map((w, i) => <div key={i} className="banner">{w}</div>)}
+      {done && !!summary.abstract_only && (
+        <p className="note abstract-only">
+          <strong>
+            {summary.abstract_only} of {summary.citations - summary.could_not_check} verdict{summary.citations - summary.could_not_check === 1 ? "" : "s"}{" "}
+            rest{summary.abstract_only === 1 ? "s" : ""} on the abstract alone
+          </strong>
+          {summary.no_free_full_text ? `, and for ${summary.no_free_full_text} of them no free full text exists` : ""}.
+          Numbers and detailed results are usually only in the full paper: open a card to paste the passage that backs your sentence.
+        </p>
+      )}
       {done && summary.read_full_text + summary.with_suggestion > 0 && (
         <p className="muted small">
           Read the open-access full text for {summary.read_full_text} citation{summary.read_full_text === 1 ? "" : "s"};

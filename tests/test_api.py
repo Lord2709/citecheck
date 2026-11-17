@@ -114,6 +114,25 @@ def test_pdf_upload_scanned_refused_text_accepted(tmp_path, fixture_dir):
     assert r.status_code == 200 and r.json()["plan"] == "verify_draft" and r.json()["pdf"]["read_pages"] == 1
 
 
+def test_a_whole_paper_pdf_is_read_and_only_its_first_citations_checked(tmp_path, fixture_dir):
+    c, _ = client(tmp_path, fixture_dir)
+    c.post("/api/me/consent", json={"research": True})
+    body, refs = DRAFT.split("\n\nReferences\n")
+    filler = "Zorvex increases bone density in adult mice [1]. " * 110          # about 5,600 characters a page
+    pages = [filler] * 14 + [body + " References " + refs.replace("\n", " ")]
+    r = c.post("/api/check-pdf", files={"file": ("paper.pdf", make_pdf(pages), "application/pdf")},
+               data={"suggest": "false", "read_full_text": "false", "max_citations": "5"})
+    assert r.status_code == 200, r.text                                   # over 60,000 characters: refused before
+    job = c.get(f"/api/jobs/{r.json()['job_id']}").json()
+    assert len(job["report"]["citations"]) == 5
+    assert any("CiteCheck checked the first 5" in w for w in job["report"]["warnings"])
+    too_long = make_pdf([filler] * 81)
+    r = c.post("/api/check-pdf", files={"file": ("book.pdf", too_long, "application/pdf")})
+    assert r.status_code == 413 and "81 pages" in r.json()["detail"]
+    events = [e["event"] for e in c.get("/api/admin/export").json()["events"]]
+    assert "pdf_too_long" in events                                       # refusals now show up in the data
+
+
 def test_discover_claim_feedback_events_and_export(tmp_path, fixture_dir):
     c, _ = client(tmp_path, fixture_dir)
     d = c.post("/api/discover", json={"direction": "bone density in mice", "k": 3}).json()
@@ -174,3 +193,108 @@ def test_publishable_key_setting(monkeypatch):
     monkeypatch.delenv("SUPABASE_PUBLISHABLE_KEY")
     monkeypatch.setenv("SUPABASE_ANON_KEY", "eyJlegacy")
     assert load_settings().supabase_anon_key == "eyJlegacy"
+
+
+def test_citation_judgement_saved_on_first_click_then_refined(tmp_path, fixture_dir):
+    c, _ = client(tmp_path, fixture_dir)
+    c.post("/api/me/consent", json={"research": True, "text": True})
+    start = c.post("/api/check-draft", json={"text": DRAFT, "read_full_text": False, "suggest": False}).json()
+    run = start["run_id"]
+    first = c.post("/api/feedback", json={"run_id": run, "citation_index": 1, "label": "DISAGREE"}).json()
+    assert first["ok"] and first["id"]                                   # a "No" is stored before any comment
+    r = c.post(f"/api/feedback/{first['id']}", json={"label": "WRONG_PAPER", "comment": "cites the rat study"}).json()
+    assert r["ok"] and r["comment_stored"]
+    c.post("/api/feedback", json={"run_id": run, "citation_index": 2, "label": "UNSURE"})
+    assert c.post("/api/feedback", json={"run_id": run, "citation_index": 1, "label": "MAYBE"}).status_code == 422
+    assert c.post("/api/feedback", json={"run_id": run, "citation_index": 1}).status_code == 422
+    assert c.post("/api/feedback/999", json={"label": "AGREE"}).status_code == 404
+    ex = c.get("/api/admin/export").json()
+    cits = {x["index"]: x for x in ex["citations"]}
+    assert cits[1]["model"] == "keyword-fake" and cits[1]["verdict"] == "SUPPORT" and cits[1]["paper_id"]
+    assert cits[1]["judgement_label"] == "WRONG_PAPER" and cits[1]["judgement_agrees"] is False
+    assert cits[2]["judgement_label"] == "UNSURE" and cits[2]["judgement_agrees"] is None
+    assert cits[3]["judgement_label"] is None and cits[3]["status"] == "unresolved"
+    assert ex["runs"][0]["options"]["model"] == "keyword-fake" and ex["runs"][0]["run"] == run[:8]
+    assert "rat study" not in str(ex)                                    # comments never leave the database
+
+
+def test_paper_relevance_feedback(tmp_path, fixture_dir):
+    c, _ = client(tmp_path, fixture_dir)
+    c.post("/api/me/consent", json={"research": True})
+    d = c.post("/api/discover", json={"direction": "bone density in mice", "k": 3}).json()
+    pid = d["results"][0]["paper"]["paper_id"]
+    ok = c.post("/api/feedback", json={"run_id": d["run_id"], "kind": "paper", "citation_index": 1, "item_id": pid,
+                                       "label": "RELEVANT"})
+    assert ok.status_code == 200
+    bad = c.post("/api/feedback", json={"run_id": d["run_id"], "kind": "paper", "citation_index": 2, "label": "AGREE"})
+    assert bad.status_code == 422                                        # citation answers do not apply to papers
+    fb = c.get("/api/admin/export").json()["feedback"]
+    assert fb == [dict(fb[0], kind="paper", index=1, item_id=pid, label="RELEVANT", agrees=True)]
+
+
+def test_participant_code_team_flag_and_delete_my_data(tmp_path, fixture_dir):
+    s = Settings(auth_mode="off", admin_emails=[], team_emails=["dev@localhost"])
+    c, _ = client(tmp_path, fixture_dir, settings=s)
+    assert c.post("/api/me/consent", json={"research": True, "participant_code": "p 04"}).status_code == 422
+    r = c.post("/api/me/consent", json={"research": True, "participant_code": "p04"}).json()
+    assert r["participant_code"] == "P04" and c.get("/api/me").json()["participant_code"] == "P04"
+    c.post("/api/check-draft", json={"text": DRAFT, "read_full_text": False, "suggest": False})
+    c.post("/api/events", json={"event": "page_view", "props": {"page": "check"}})
+    assert c.get("/api/admin/export").status_code == 403                 # not an admin, only on the team
+    out = c.post("/api/me/delete").json()
+    assert out["deleted"]["checks"] == 1 and out["deleted"]["events"] == 1
+    assert c.get("/api/history").json()["runs"] == [] and c.get("/api/me").json()["needs_consent"] is True
+
+
+def test_team_accounts_are_flagged_not_removed(tmp_path, fixture_dir):
+    c, _ = client(tmp_path, fixture_dir)                                 # dev@localhost is an admin: always team
+    c.post("/api/me/consent", json={"research": True, "participant_code": "T1"})
+    users = c.get("/api/admin/export").json()["users"]
+    assert len(users) == 1 and users[0]["team"] is True and users[0]["participant_code"] == "T1"
+
+
+def test_reference_list_in_its_own_box(tmp_path, fixture_dir):
+    c, _ = client(tmp_path, fixture_dir)
+    body, refs = DRAFT.split("\n\nReferences\n")
+    start = c.post("/api/check-draft", json={"text": body, "references": refs, "read_full_text": False,
+                                              "suggest": False}).json()
+    job = c.get(f"/api/jobs/{start['job_id']}").json()
+    assert job["summary"]["supported"] == 1 and not job["report"]["warnings"]
+
+
+def test_existing_tables_get_the_new_columns(tmp_path):
+    import sqlalchemy as sa
+    url = f"sqlite:///{tmp_path}/old.db"
+    eng = sa.create_engine(url)
+    with eng.begin() as conn:                                            # the tables as the first release made them
+        conn.execute(sa.text("CREATE TABLE users (id VARCHAR(64) PRIMARY KEY, created_at DATETIME, last_seen DATETIME, "
+                             "consent_research BOOLEAN, consent_text BOOLEAN, consent_at DATETIME)"))
+        conn.execute(sa.text("CREATE TABLE feedback (id INTEGER PRIMARY KEY, user_id VARCHAR(64), run_id VARCHAR(36), "
+                             "citation_index INTEGER, agrees BOOLEAN, comment_chars INTEGER, comment TEXT, "
+                             "created_at DATETIME)"))
+        conn.execute(sa.text("INSERT INTO users (id, consent_research) VALUES ('old-user', 1)"))
+    store = Store(url)
+    cols = {c["name"] for c in sa.inspect(store.engine).get_columns("users")}
+    assert {"participant_code", "is_team"} <= cols
+    fb_cols = {c["name"] for c in sa.inspect(store.engine).get_columns("feedback")}
+    assert {"kind", "label", "item_id", "updated_at"} <= fb_cols
+    assert store.touch_user("old-user", is_team=False)["consent_research"] is True
+    Store(url)                                                           # running it again changes nothing
+
+
+def test_paste_a_passage_of_the_paper(tmp_path, fixture_dir):
+    c, _ = client(tmp_path, fixture_dir)
+    c.post("/api/me/consent", json={"research": True})
+    start = c.post("/api/check-draft", json={"text": DRAFT, "read_full_text": False, "suggest": False}).json()
+    passage = "Table 3: in older adults, exercise improves sleep quality by 21 percent over twelve weeks."
+    r = c.post("/api/recheck", json={"run_id": start["run_id"], "citation_index": 2, "abstract": passage,
+                                      "kind": "passage"}).json()
+    cit = r["citation"]
+    assert cit["verdict"]["label"] == "SUPPORT" and cit["pasted_kind"] == "passage"
+    assert cit["full_text_status"] == "pasted" and cit["paper"]["doi"] == "10.1000/noabs"    # still links the paper
+    md = c.get(f"/api/runs/{start['run_id']}/report.md").text
+    assert "(passage pasted by the researcher)" in md and "from the passage you pasted" in md
+    events = c.get("/api/admin/export").json()["events"]
+    assert any(e["event"] == "passage_pasted" and e["props"]["was"] == "none" for e in events)
+    bad = c.post("/api/recheck", json={"run_id": start["run_id"], "citation_index": 2, "abstract": "x", "kind": "pdf"})
+    assert bad.status_code == 422

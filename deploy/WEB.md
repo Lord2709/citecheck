@@ -18,15 +18,22 @@ offer 512 MB of memory while the site needs about 2 GB (PyTorch plus the verifie
 
 | Table | What | When |
 |---|---|---|
-| `users` | consent choices, first and last visit (no e-mail: Supabase Auth keeps that) | everyone who signs in |
-| `runs` | each draft check or paper search: length of the input, options, summary counts, the report shown | everyone (it is their History) |
+| `users` | consent choices, first and last visit, a team flag, and the study code a participant typed (no e-mail: Supabase Auth keeps that) | everyone who signs in |
+| `runs` | each draft check or paper search: length of the input, options (including the model that checked it), summary counts, the report shown | everyone (it is their History) |
 | `runs.input_text` | the pasted text, e-mails and phone numbers masked | only with "also keep the text I paste" |
-| `feedback` | 👍/👎 per report or citation; comment text only with text consent | everyone |
+| `feedback` | "is this right?" per citation (yes / no and what is right / not sure) and "relevant?" per paper-search result, saved on the first click; comment text only with text consent | everyone |
 | `events` | page views and clicks | only with "help us improve CiteCheck" |
 
 `/api/admin/export` (button on the Account page, for e-mails in `CITECHECK_ADMIN_EMAILS`) downloads usage, outcomes and
-feedback of consenting users, with salted-hash ids and no free text. Review an export before committing any of it to
-`evidence/`.
+answers of consenting users, with salted-hash ids and no free text: one row per citation checked (`citations`, with the
+model and the person's answer), study codes, and team accounts flagged, not removed. Review an export before committing
+any of it to `evidence/`. Anyone can delete their own data from the Account page.
+
+Columns added after the first release are added to the existing tables when the site starts (`api/db.py`,
+`_add_missing_columns`); nothing has to be run in Supabase by hand.
+
+**User studies.** Give each participant a link with their code, for example `https://<site>/?code=P04`: the consent
+screen fills the study code in, so the session notes and the export can be matched without names.
 
 ## 1. Supabase (once, about 15 minutes)
 
@@ -61,6 +68,7 @@ feedback of consenting users, with salted-hash ids and no free text. Review an e
 | `SUPABASE_PUBLISHABLE_KEY` | variable | publishable key `sb_publishable_...` (public by design; the legacy anon key also works as `SUPABASE_ANON_KEY`) |
 | `DATABASE_URL` | **secret** | `postgresql+psycopg://...` session-pooler URI with the password |
 | `CITECHECK_ADMIN_EMAILS` | secret | team e-mails allowed to download the research export, comma-separated |
+| `CITECHECK_TEAM_EMAILS` | secret | the other team members' e-mails, comma-separated; their accounts are flagged as team in the export (admins always are) |
 | `CITECHECK_EXPORT_SALT` | secret | any long random string |
 | `CITECHECK_MAILTO` | variable | team contact e-mail (Crossref, Unpaywall) |
 | `OPENALEX_API_KEY`, `S2_API_KEY` | secrets | optional free keys |

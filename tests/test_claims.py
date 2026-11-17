@@ -59,3 +59,31 @@ def test_find_markers_ignores_years_without_names():
     markers, keys, ids = find_markers("Cases rose sharply between 2019 and 2020 in the region.")
     assert markers == [] and keys == [] and ids == []
     assert parse_reference_list("[1] A\n[2] B\n") .keys() == {"1", "2"}
+
+
+def test_reference_list_without_a_heading_is_found_at_the_end():
+    from src.claims import split_body_and_references
+    numeric = ("Transformers rely on attention [1]. SciFact pairs claims with abstracts [2].\n\n"
+               "[1] Vaswani et al. Attention Is All You Need. NeurIPS 2017. arXiv:1706.03762\n"
+               "[2] Wadden et al. Fact or Fiction. EMNLP 2020. doi:10.18653/v1/2020.emnlp-main.609\n")
+    p = parse_draft(numeric)
+    assert sorted(p.references) == ["1", "2"] and len(p.claims) == 2 and not p.warnings
+    author_year = ("Deep learning can detect vulnerabilities (Russell et al., 2018). "
+                   "Graph models help (Zhou et al., 2019).\n\n"
+                   "Russell, R., Kim, L., Hamilton, L. (2018). Automated vulnerability detection in source code\n"
+                   "representation learning. In ICMLA.\n"
+                   "Zhou, Y., Liu, S., Siow, J. (2019). Devign: Effective vulnerability identification. NeurIPS.\n")
+    p = parse_draft(author_year)
+    assert [c.keys for c in p.claims] == [["russell2018"], ["zhou2019"]] and not p.warnings
+    one_entry = "A claim with a citation [1].\n\n[1] Doe. Title. 2020."     # a single entry-like line is not enough
+    assert split_body_and_references(one_entry)[1] == ""
+    body_only = "Smith et al. (2019) showed this in mice. Lee (2020) did not [3]."
+    assert split_body_and_references(body_only) == (body_only, "")
+
+
+def test_reference_list_from_its_own_box():
+    from src.claims import join_references
+    assert join_references("Body [1].", "[1] Doe. 2020.") == "Body [1].\n\nReferences\n[1] Doe. 2020.\n"
+    with_heading = join_references("Body [1].\n\nReferences\n[1] Doe 2020", "[2] Roe 2021")
+    assert with_heading.count("References") == 1 and with_heading.endswith("[2] Roe 2021\n")
+    assert join_references("Body.\n", "   ") == "Body.\n"          # nothing to add: unchanged

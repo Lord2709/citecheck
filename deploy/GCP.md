@@ -96,6 +96,7 @@ The other settings (secrets, flags) carry over from the previous revision.
 | Recent logs | `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="citecheck"' --freshness=15m --limit=60 --format='value(textPayload)' \| tac` |
 | Change a secret | `... \| gcloud secrets versions add NAME --data-file=-`, then `gcloud run services update citecheck --update-secrets NAME=NAME:latest` (a new revision reads it) |
 | Add an admin | add a new version of `CITECHECK_ADMIN_EMAILS` (comma-separated, no spaces), then the update above |
+| Flag team accounts | once: `printf '%s' 'a@x.edu,b@y.edu' \| gcloud secrets create CITECHECK_TEAM_EMAILS --data-file=-`, `gcloud secrets add-iam-policy-binding CITECHECK_TEAM_EMAILS --member=serviceAccount:citecheck-run@citecheck-512817.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor`, then `gcloud run services update citecheck --update-secrets CITECHECK_TEAM_EMAILS=CITECHECK_TEAM_EMAILS:latest` |
 | Roll back | `gcloud run revisions list --service citecheck`, then `gcloud run services update-traffic citecheck --to-revisions=REVISION=100` |
 | Save credit | `gcloud run services update citecheck --min-instances 0` (first visit after idle then waits 30–60 s) |
 | Old secret versions | `gcloud secrets versions list DATABASE_URL`, then `gcloud secrets versions destroy N --secret=DATABASE_URL --quiet` |
