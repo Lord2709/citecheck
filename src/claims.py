@@ -24,6 +24,16 @@ from .text_utils import split_sentences
 REF_HEADING = re.compile(r"^\s*(?:\d+\.?\s*)?(references|bibliography|works cited|literature cited|reference list)\s*:?\s*$",
                          re.I | re.M)
 NUMERIC = re.compile(r"\[\s*(\d+(?:\s*[,–—-]\s*\d+)*)\s*\]")
+# Superscript citations ("…mortality risk3,12." in Nature-style papers) lose their formatting when text is copied or
+# read from a PDF: the numbers end up glued to the word or punctuation before them.  Only a lower-case letter, a closing
+# bracket or quote, or punctuation may come before them (not "0.778", not "ResNet50"), and only spaces, punctuation or the
+# end may follow.
+SUPERSCRIPT = re.compile(r"(?<=[a-z)\]’”'.,;:])(?<!\d[.,])(\d{1,3}(?:\s?[,–—-]\s?\d{1,3})*)(?=[\s.,;:)]|$)")
+MIN_SUPERSCRIPTS = 3        # fewer glued numbers than this are more likely ordinary numbers than a citation style
+# Author and affiliation lines carry superscript numbers too ("Jordan Bortz1,2", "Imperial College London, UK.6"): a
+# line that looks like one is skipped.
+AFFILIATION = re.compile(r"\b(?:Department|University|Universit[àé]|Institute|College|School|Faculty|Centre|Center|"
+                         r"Hospital|Laborator(?:y|ies)|Inc|Ltd|GmbH|Email|e-mail|Correspondence)\b|@|✉")
 PAREN = re.compile(r"\(([^()]*?\b(?:19|20)\d{2}[a-z]?\b[^()]*)\)")
 NARRATIVE = re.compile(r"\b([A-Z][A-Za-z\-'’]+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-'’]+)?\s+\(((?:19|20)\d{2}[a-z]?)\)")
 YEAR = re.compile(r"\b((?:19|20)\d{2})[a-z]?\b")
@@ -228,10 +238,41 @@ def resolve_key(key: str, refs: dict) -> Optional[str]:
     return None
 
 
+def superscripts_to_brackets(body: str, n_refs: int) -> tuple:
+    """(body with superscript citations written as [n], how many were found).  Used only when the reference list is
+    numbered and the text has no bracketed citations: every number must be an entry of the list (1..n_refs)."""
+    if n_refs <= 0 or NUMERIC.search(body):
+        return body, 0
+
+    def numbers(group: str) -> list:
+        out = []
+        for part in group.split(","):
+            a, _, b = part.replace("–", "-").replace("—", "-").partition("-")
+            out += [int(a)] + ([int(b)] if b else [])
+        return out
+
+    def line_of(m) -> str:
+        return body[body.rfind("\n", 0, m.start()) + 1: (body.find("\n", m.end()) + 1 or len(body) + 1) - 1]
+
+    hits = [m for m in SUPERSCRIPT.finditer(body)
+            if all(1 <= n <= n_refs for n in numbers(m.group(1))) and not AFFILIATION.search(line_of(m))]
+    if len(hits) < MIN_SUPERSCRIPTS:
+        return body, 0
+    out, last = [], 0
+    for m in hits:
+        out += [body[last:m.start()], f" [{m.group(1)}]"]
+        last = m.end()
+    return "".join(out + [body[last:]]), len(hits)
+
+
 def parse_draft(text: str, max_claims: int = 200) -> DraftParse:
     body, ref_block = split_body_and_references(text or "")
     refs = parse_reference_list(ref_block)
     warnings, claims = [], []
+    if refs and all(k.isdigit() for k in refs):
+        body, n_sup = superscripts_to_brackets(body, max(int(k) for k in refs))
+        if n_sup:
+            warnings.append(f"Read {n_sup} superscript citation numbers (for example “…risk3,12.”) as citations.")
     numeric_seen = author_seen = False
     for sent in split_sentences(body):
         markers, keys, ids = find_markers(sent)

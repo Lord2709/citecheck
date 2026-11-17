@@ -130,11 +130,25 @@ CITATION_MARK = re.compile(r"\[\d")
 
 
 def _edge_key(line: str) -> str:
-    """A header seen on several pages differs only in its numbers ("Procedia 00 (2019) 123-130").  A line with a
-    citation marker is body text, never a header."""
+    """A header seen on several pages differs only in its numbers ("Procedia 00 (2019) 123-130") and, on left and right
+    pages, in the order of its parts ("ARTICLE  JOURNAL | doi" / "JOURNAL | doi  ARTICLE"), so the key is its set of
+    words with digits blanked.  A line with a citation marker is body text, never a header."""
     if CITATION_MARK.search(line):
         return ""
-    return re.sub(r"\d+", "#", line.strip().lower())
+    words = re.findall(r"[^\s|]+", re.sub(r"\d+", "#", line.strip().lower()))
+    return " ".join(sorted(set(words)))
+
+
+OWN_DOI = re.compile(r"(?:https?://(?:dx\.)?doi\.org/|doi:\s*)?(10\.\d{4,9}/[^\s|]+)", re.I)
+
+
+def own_dois(page_texts: Sequence) -> set:
+    """DOIs printed on at least half of the pages (at least 3): the document's own, from its running header or footer."""
+    n, counts = len(page_texts), {}
+    for t in page_texts:
+        for d in {m.group(1).rstrip(".,;)").lower() for m in OWN_DOI.finditer(t or "")}:
+            counts[d] = counts.get(d, 0) + 1
+    return {d for d, c in counts.items() if n >= 3 and c >= max(3, REPEAT_SHARE * n)}
 
 
 def clean_page_texts(page_texts: Sequence) -> list:
@@ -142,6 +156,10 @@ def clean_page_texts(page_texts: Sequence) -> list:
 
     A paper's running header ("Journal of X 12 (2019) 345-356", "Author et al.") would otherwise be read as part of
     the sentences around it, and "evalu-\nation" would never match the paper's "evaluation"."""
+    own = own_dois(page_texts)
+    if own:                               # the paper's own DOI is not a citation in its text
+        drop = lambda m: "" if m.group(1).rstrip(".,;)").lower() in own else m.group(0)  # noqa: E731
+        page_texts = [OWN_DOI.sub(drop, t or "") for t in page_texts]
     pages = [(t or "").splitlines() for t in page_texts]
     n = len(pages)
     counts = {}

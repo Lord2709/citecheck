@@ -87,3 +87,20 @@ def test_reference_list_from_its_own_box():
     with_heading = join_references("Body [1].\n\nReferences\n[1] Doe 2020", "[2] Roe 2021")
     assert with_heading.count("References") == 1 and with_heading.endswith("[2] Roe 2021\n")
     assert join_references("Body.\n", "   ") == "Body.\n"          # nothing to add: unchanged
+
+
+def test_superscript_citations_read_from_a_pdf_or_copied_text():
+    from src.claims import superscripts_to_brackets
+
+    refs = "\n".join(f"{i}. Author{i}, A. Title number {i}. Journal 20{i:02d}." for i in range(1, 21))
+    text = ("Blood biomarkers predict mortality risk3,12. Machine learning is popular in this field12– 14. "
+            "The model reached a C-index of 0.778 on 306,116 people. A ResNet50 backbone was used. "
+            "Telomere clocks were weaker in older cohorts9.\n"
+            "Department of Epidemiology, Imperial College London, London, UK.6\n\nReferences\n" + refs)
+    p = parse_draft(text)
+    assert [c.keys for c in p.claims] == [["3", "12"], ["12", "13", "14"], ["9"]]
+    assert p.warnings and "superscript" in p.warnings[0]
+    bracketed = "One claim [1]. Another claim [2]. A third value4, a fourth6, a fifth8.\n\nReferences\n" + refs
+    assert superscripts_to_brackets(bracketed.split("\n\nReferences")[0], 20)[1] == 0     # a bracket style stays as it is
+    few = "Only one glued number here12. Nothing else.\n\nReferences\n" + refs
+    assert parse_draft(few).claims == []                                                   # too few to be a style
