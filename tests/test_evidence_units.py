@@ -10,8 +10,8 @@ from src.evidence import LexicalSentenceScorer, aggregate_sentence_probs, score_
 from src.pipeline import CiteCheckPipeline, build_pipeline
 from src.retrieval import BM25Retriever
 from src.schema import Doc, Hit, Probs, SUPPORT
-from tests.test_pipeline import Scripted
-from tests.test_run_eval import base_args
+from test_pipeline import Scripted
+from test_run_eval import base_args
 
 DOC = Doc(doc_id="d1", title="T", sentences=(
     "Background on bones.",
@@ -107,7 +107,7 @@ def test_pair_builders_match_the_unit(fixture_dir, unit):
 def test_train_and_evaluate_each_unit(fixture_dir, tmp_path, unit):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
-    from tests.tiny_model import make_tiny_nli
+    from tiny_model import make_tiny_nli
 
     tiny = make_tiny_nli(tmp_path / "base")
     out = tmp_path / "ft"

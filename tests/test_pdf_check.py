@@ -93,3 +93,16 @@ def test_running_headers_footers_and_page_numbers_are_removed():
 def test_words_split_across_lines_are_joined_but_compounds_keep_their_hyphen():
     out = pc.clean_page_texts(["The evalu-\nation of self-\nsupervised models [1]. New-\nYork stays."])[0]
     assert "evaluation of self-supervised models [1]." in out and "New-\nYork" in out
+
+
+def test_left_and_right_page_headers_and_the_papers_own_doi_are_removed():
+    doi = "https://doi.org/10.1038/s42003-023-05456-z"
+    pages = []
+    for i, w in enumerate(["alpha", "beta", "gamma", "delta", "epsilon", "zeta"], 1):
+        head = f"ARTICLE COMMUNICATIONS BIOLOGY | {doi}" if i % 2 else f"COMMUNICATIONS BIOLOGY | {doi} ARTICLE"
+        pages.append(f"The {w} cohort was studied3.\nIt agreed with earlier work on {w}.\n{head}\n"
+                     f"{i} COMMUNICATIONS BIOLOGY| (2023) 6:1089 | {doi} | www.nature.com/commsbio")
+    pages[0] = "Abstract text ends here. " + doi + " OPEN\n" + pages[0]
+    cleaned = pc.clean_page_texts(pages)
+    assert not any("COMMUNICATIONS BIOLOGY" in p or "s42003" in p for p in cleaned)
+    assert cleaned[1].startswith("The beta cohort was studied3.")

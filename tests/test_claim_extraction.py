@@ -4,7 +4,7 @@ import json
 from src.claim_extraction import ClaimExtractor, aggregate, build_prompt, parse_claims
 from src.pipeline import CiteCheckPipeline
 from src.schema import CONTRADICT, NEI, PARTIAL, Paper, Probs, Reference, SUPPORT
-from tests.test_pipeline import Scripted
+from test_pipeline import Scripted
 
 CTX = "Zorvex increases bone density [3] but causes headaches, unlike our drug."
 PAPER = Paper("p", "Zorvex trial", "Zorvex increased bone density in mice. No adverse events were recorded.")

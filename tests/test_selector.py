@@ -6,7 +6,7 @@ import pytest
 from eval import run_eval
 from src.data_io import load_claims, load_corpus
 from src.evidence import LexicalSentenceScorer, build_sentence_scorer, selection_recall
-from tests.test_run_eval import base_args
+from test_run_eval import base_args
 
 
 def test_selection_recall_needs_a_complete_rationale():
@@ -36,7 +36,7 @@ def test_train_selector_and_use_it_in_run_eval(fixture_dir, tmp_path):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
     from eval import train_selector
-    from tests.tiny_model import make_tiny_nli
+    from tiny_model import make_tiny_nli
 
     base = make_tiny_nli(tmp_path / "base")
     out = tmp_path / "sel"
@@ -72,7 +72,7 @@ def test_finetune_builds_premises_with_the_learned_selector(fixture_dir, tmp_pat
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
     from eval import finetune_nli
-    from tests.tiny_model import make_tiny_nli
+    from tiny_model import make_tiny_nli
 
     tiny = make_tiny_nli(tmp_path / "base")
     out = tmp_path / "ft"
