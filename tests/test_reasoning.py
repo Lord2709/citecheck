@@ -6,7 +6,7 @@ import pytest
 from eval import run_eval
 from src import reasoning as R
 from src.schema import CONTRADICT, NEI, SUPPORT
-from tests.test_run_eval import base_args
+from test_run_eval import base_args
 
 NICOTINE = ("At 52 weeks, 30.9% of the combination group were abstinent compared with 24.5% with varenicline "
             "(OR, 1.39; 95% CI, 0.93-2.07; P = .11).")
@@ -172,7 +172,7 @@ def test_local_llm_runs_a_real_causal_lm(tmp_path):
     pytest.importorskip("transformers")
     from transformers import BertTokenizerFast, GPT2Config, GPT2LMHeadModel
 
-    from tests.tiny_model import make_tiny_nli
+    from tiny_model import make_tiny_nli
 
     tok_dir = make_tiny_nli(tmp_path / "tok")
     tok = BertTokenizerFast.from_pretrained(tok_dir)

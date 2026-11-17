@@ -186,7 +186,7 @@ def test_error_report_names_the_driver_paper():
 def test_cache_key_changes_when_a_local_checkpoint_is_retrained(tmp_path):
     pytest.importorskip("torch")
     pytest.importorskip("transformers")
-    from tests.tiny_model import make_tiny_nli
+    from tiny_model import make_tiny_nli
 
     path = tmp_path / "ft"
     make_tiny_nli(path, seed=0)
@@ -203,7 +203,7 @@ def test_finetune_trains_fp32_weights_from_an_fp16_checkpoint(fixture_dir, tmp_p
     from transformers import AutoModelForSequenceClassification
 
     from eval import finetune_nli
-    from tests.tiny_model import make_tiny_nli
+    from tiny_model import make_tiny_nli
 
     base = make_tiny_nli(tmp_path / "base")
     AutoModelForSequenceClassification.from_pretrained(base).half().save_pretrained(base)
