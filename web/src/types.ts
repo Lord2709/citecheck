@@ -53,6 +53,9 @@ export interface Citation {
   suggestions: Suggestion[];
   steps: Step[];
   abstract_pasted?: boolean;
+  pasted_kind?: "abstract" | "passage";
+  // read | not_found (no free copy) | not_needed (the abstract was decisive) | off | pasted | "" (older reports)
+  full_text_status?: string;
 }
 
 export interface Summary {
@@ -64,6 +67,9 @@ export interface Summary {
   needs_attention: number;
   read_full_text: number;
   with_suggestion: number;
+  abstract_only?: number;
+  no_free_full_text?: number;
+  free_copy_refused?: number;
 }
 
 export interface DraftReport {
@@ -111,6 +117,7 @@ export interface Me {
   email: string;
   is_admin: boolean;
   consent: { research: boolean | null; text: boolean };
+  participant_code: string;
   needs_consent: boolean;
 }
 

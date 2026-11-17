@@ -63,3 +63,18 @@ def test_corpus_source_offline(fixture_dir):
 def test_explain_picks_best_sentence():
     p = Paper("x", "T", "Cooking is fun. Scientific claims need verification against evidence.")
     assert dsc.explain("verifying scientific claims", p).startswith("Scientific claims")
+
+
+def test_filler_words_are_left_out_of_the_query():
+    q = dsc.build_query("I am working on predicting biological age, and I'm looking for a good opening to frame my "
+                        "research direction")
+    assert q == "predicting biological age"
+
+
+def test_arxiv_asks_again_with_fewer_words_when_it_finds_little():
+    empty = """<feed xmlns="http://www.w3.org/2005/Atom"></feed>"""
+    f = fetcher([("export.arxiv.org", [Resp(200, text=empty), Resp(200, text=ATOM)])])
+    found = dsc.PaperSearch(f, sources=("arxiv",)).search("scientific claim verification evidence abstracts corpus", 5)
+    queries = [params["search_query"] for url, params, _ in f.session.calls]
+    assert len(queries) == 2 and queries[0].count("AND") == 4 and queries[1].count("AND") == 2
+    assert [c.paper.paper_id for c in found.candidates] == ["arxiv:2004.14974"]

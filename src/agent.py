@@ -16,6 +16,7 @@ until the calibration work (docs/agent_plan.md, Part 2) tunes it on the calibrat
 """
 from __future__ import annotations
 
+import copy
 import os
 import re
 import time
@@ -26,6 +27,7 @@ from typing import Callable, Optional, Sequence
 from .claims import parse_draft
 from .evidence import LexicalSentenceScorer
 from .ingest import IngestError
+from .report import full_text_status
 from .schema import CONTRADICT, NEI, SUPPORT, Doc, Paper
 
 CHUNK_SENTENCES = 5          # full text is judged in passages of this many sentences
@@ -79,6 +81,7 @@ class CitationResult:
             "status_detail": self.status_detail, "paper": _paper_dict(self.paper) if self.paper else None,
             "verdict": _verdict_dict(self.verdict) if self.verdict is not None else None,
             "read_full_text": self.read_full_text, "full_text_source": self.full_text_source,
+            "full_text_status": full_text_status(self.read_full_text, self.steps) if self.verdict is not None else "",
             "suggestions": [s.to_dict() for s in self.suggestions], "steps": [asdict(s) for s in self.steps],
         }
 
@@ -213,6 +216,9 @@ class CiteCheckAgent:
             else:
                 ft = self._timed(steps, "find open-access full text", lambda: (
                     (f := self.fulltext.find(paper)), self.fulltext.last_detail if f is None else f"found: {self.fulltext.last_detail}"))
+                free = getattr(self.fulltext, "last_free_url", "") if ft is None else ""
+                if free:
+                    steps.append(Step("free copy", free, 0.0))     # a person can read it; we could not download it
                 if ft is not None and ft.sentences:
                     v2 = self._timed(steps, "verify full text", lambda: (
                         (r := self._verify_full_text(claim, paper, ft.sentences)),
@@ -281,7 +287,8 @@ class CiteCheckAgent:
         if not pairs:
             warnings.append("No citations found. Mark citations as [1] or (Author, year) and add a 'References' list.")
         if len(pairs) > max_citations:
-            warnings.append(f"Checked the first {max_citations} of {len(pairs)} citations.")
+            warnings.append(f"Your text has {len(pairs)} citations; CiteCheck checked the first {max_citations}. "
+                            "To check the others, paste the part of the text where they are.")
             pairs = pairs[:max_citations]
         results, cache = [], {}
 
@@ -347,6 +354,9 @@ class CiteCheckAgent:
         stub = stub_paper(r.identifier, r.status_detail)
         ft = self._timed(r.steps, "find open-access full text", lambda: (
             (f := self.fulltext.find(stub)), self.fulltext.last_detail if f is None else f"found: {self.fulltext.last_detail}"))
+        free = getattr(self.fulltext, "last_free_url", "") if ft is None else ""
+        if free:
+            r.steps.append(Step("free copy", free, 0.0))
         if ft is None or not ft.sentences:
             r.status_detail += " No open-access full text was found either."
             return
@@ -361,23 +371,35 @@ class CiteCheckAgent:
         if v.label != SUPPORT and self.suggest and self.search is not None:
             r.suggestions = self._suggest(claim, stub, draft_year, r.steps)
 
-    def recheck_with_abstract(self, citation: dict, title: str, abstract: str, draft_year: Optional[int] = None) -> dict:
-        """The researcher pasted the abstract for a citation we could not check.  Returns the updated citation dict
-        (same shape as CitationResult.to_dict()), marked as checked against a pasted abstract."""
+    def recheck_with_abstract(self, citation: dict, title: str, abstract: str, draft_year: Optional[int] = None,
+                              kind: str = "abstract") -> dict:
+        """The researcher pasted the abstract, or a passage of the paper (kind="passage"), for a citation we could not
+        check or could only check on the abstract.  Returns the updated citation dict (same shape as
+        CitationResult.to_dict()), judged on the pasted text and marked as such."""
+        from dataclasses import replace
+
         from .ingest import paper_from_text
 
-        title = (title or (citation.get("paper") or {}).get("title")
-                 or stub_paper(citation.get("identifier") or "", citation.get("status_detail", "")).title or "Pasted abstract")
+        stub = stub_paper(citation.get("identifier") or "", citation.get("status_detail", ""))
+        old = citation.get("paper") or {"title": stub.title if citation.get("identifier") else "", "url": stub.url,
+                                         "doi": stub.doi}
+        title = title or old.get("title") or "Pasted abstract"
         paper = paper_from_text(title, abstract)
+        if old.get("url") or old.get("doi"):                 # keep the link to the real paper
+            paper = replace(paper, url=old.get("url"), doi=old.get("doi"), year=old.get("year"))
         steps = [Step(**s) for s in citation.get("steps") or []]
-        steps.append(Step("abstract pasted", "the researcher pasted the abstract for this citation", 0.0))
-        v, read_ft, ft_src, sugg, steps = self.check_claim(citation["claim"], paper, draft_year, steps)
+        steps.append(Step(f"{kind} pasted", f"the researcher pasted the {kind} for this citation", 0.0))
+        judge = copy.copy(self)
+        judge.escalate = False                  # judge on what the researcher pasted, not on another copy we find
+        v, read_ft, ft_src, sugg, steps = judge.check_claim(citation["claim"], paper, draft_year, steps)
         r = CitationResult(index=citation["index"], sentence=citation["sentence"], claim=citation["claim"],
                            marker=citation["marker"], reference_text=citation.get("reference_text", ""),
                            identifier=citation.get("identifier"), status="checked", paper=paper, verdict=v,
                            read_full_text=read_ft, full_text_source=ft_src, suggestions=sugg, steps=steps)
         d = r.to_dict()
         d["abstract_pasted"] = True
+        d["pasted_kind"] = kind
+        d["full_text_status"] = "pasted"
         return d
 
     # ---- discovery ------------------------------------------------------------------------------

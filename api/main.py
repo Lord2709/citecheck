@@ -13,7 +13,7 @@ import threading
 from contextlib import asynccontextmanager
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,17 +26,23 @@ from api.jobs import JobManager
 from api.ratelimit import RateLimiter
 from api.settings import Settings, load_settings
 from src.agent import CitationResult
+from src.claims import join_references
 from src.ingest import IngestError, paper_from_text
-from src.pdf_check import PdfRejected, check_pdf, extract_page_texts
+from src.pdf_check import PdfRejected, assess_pages, clean_page_texts, extract_page_texts
 from src.report import summarize, to_markdown
 
 WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 EVENT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+PARTICIPANT_CODE = re.compile(r"^[A-Za-z0-9-]{1,16}$")
+# What a person can answer.  Citations: "Yes" (AGREE), "Not sure" (UNSURE), or "No" (DISAGREE) and then what is right.
+CITATION_LABELS = {"AGREE", "UNSURE", "DISAGREE", "SUPPORT", "CONTRADICT", "NEI", "WRONG_PAPER"}
+PAPER_LABELS = {"RELEVANT", "NOT_RELEVANT"}
 
 
 # ---- request bodies -------------------------------------------------------------------------------
 class DraftIn(BaseModel):
     text: str
+    references: str = ""            # the reference list, when it is pasted in its own box
     read_full_text: bool = True
     suggest: bool = True
     max_citations: int = Field(20, ge=1, le=40)
@@ -46,7 +52,8 @@ class RecheckIn(BaseModel):
     run_id: str
     citation_index: int
     title: str = ""
-    abstract: str
+    abstract: str = Field(..., max_length=20_000)    # the abstract, or a passage of the paper (kind="passage")
+    kind: Literal["abstract", "passage"] = "abstract"
 
 
 class DiscoverIn(BaseModel):
@@ -64,9 +71,17 @@ class ClaimIn(BaseModel):
 
 class FeedbackIn(BaseModel):
     run_id: Optional[str] = None
-    citation_index: Optional[int] = None
-    agrees: bool
+    citation_index: Optional[int] = None      # the citation's number, or the rank of a paper-search result
+    kind: Literal["citation", "paper"] = "citation"
+    label: Optional[str] = None
+    item_id: str = Field("", max_length=200)  # the paper id of a search result
+    agrees: Optional[bool] = None
     comment: str = ""
+
+
+class FeedbackUpdateIn(BaseModel):
+    label: Optional[str] = None
+    comment: Optional[str] = None
 
 
 class EventIn(BaseModel):
@@ -78,6 +93,24 @@ class EventIn(BaseModel):
 class ConsentIn(BaseModel):
     research: bool
     text: bool = False
+    participant_code: str = ""
+
+
+def judgement(kind: str, label: Optional[str], agrees: Optional[bool]):
+    """(label, agrees) after checking the label; a label decides agreement, so old clients that send only
+    `agrees` still work."""
+    if label is None:
+        if agrees is None:
+            raise HTTPException(422, "Say whether the result is right.")
+        return None, bool(agrees)
+    allowed = CITATION_LABELS if kind == "citation" else PAPER_LABELS
+    if label not in allowed:
+        raise HTTPException(422, "Unknown answer.")
+    if label in ("AGREE", "RELEVANT"):
+        return label, True
+    if label == "UNSURE":
+        return label, None
+    return label, False
 
 
 def default_agent_factory():
@@ -144,10 +177,17 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
             user: User = verifier.verify(authorization)
         except AuthError as e:
             raise HTTPException(401, str(e))
-        row = store.touch_user(user.id)
+        email = (user.email or "").lower()
+        is_admin = bool(email and email in settings.admin_emails)
+        row = store.touch_user(user.id, is_team=bool(email and (is_admin or email in settings.team_emails)))
         row["email"] = user.email
-        row["is_admin"] = bool(user.email and user.email in settings.admin_emails)
+        row["is_admin"] = is_admin
         return row
+
+    def model_options() -> dict:
+        """Which model produced a check, stored with it: the site's model can change between two sessions."""
+        meta = dict(getattr(getattr(get_agent(), "pipe", None), "meta", {}) or {})
+        return {"model": str(meta.get("verifier", "unknown"))[:200], "tau": meta.get("tau")}
 
     def limit(user: dict, action: str, per_minute: int):
         if not limiter.allow(f"{user['id']}:{action}", per_minute):
@@ -168,12 +208,22 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
     def me(user: dict = Depends(current)):
         return {"id": user["id"], "email": user["email"], "is_admin": user["is_admin"],
                 "consent": {"research": user["consent_research"], "text": bool(user["consent_text"])},
+                "participant_code": user.get("participant_code") or "",
                 "needs_consent": user["consent_research"] is None}
 
     @app.post("/api/me/consent")
     def consent(body: ConsentIn, user: dict = Depends(current)):
-        store.set_consent(user["id"], body.research, body.text)
-        return {"ok": True, "consent": {"research": body.research, "text": bool(body.research and body.text)}}
+        code = body.participant_code.strip().upper()
+        if code and not PARTICIPANT_CODE.match(code):
+            raise HTTPException(422, "A participant code has only letters, digits and dashes (for example P04).")
+        store.set_consent(user["id"], body.research, body.text, code)
+        return {"ok": True, "consent": {"research": body.research, "text": bool(body.research and body.text)},
+                "participant_code": code if body.research else ""}
+
+    @app.post("/api/me/delete")
+    def delete_my_data(user: dict = Depends(current)):
+        counts = store.delete_user_data(user["id"])
+        return {"ok": True, "deleted": counts}
 
     @app.get("/api/status")
     def status(user: dict = Depends(current)):
@@ -182,12 +232,18 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
                 "(full-text reading, suggested papers) is evaluated by the swap test in eval/results/agent_swap_dev."}
 
     # ---- checking a draft ------------------------------------------------------------------------------
-    def start_check(user: dict, text: str, options: dict, kind_input: str):
+    def start_check(user: dict, text: str, options: dict, kind_input: str, references: str = ""):
         if not text.strip():
             raise HTTPException(422, "Paste your text (with its reference list) first.")
-        if len(text) > settings.max_text_chars:
+        text = join_references(text, references)    # the reference-list box: no "References" heading needed
+        if kind_input == "pdf":
+            if len(text) > settings.max_pdf_chars:
+                store.add_event(user, "pdf_too_long", {"chars": len(text)}, None)
+                raise HTTPException(413, "That PDF has more text than CiteCheck reads at once. Upload the paper "
+                                         "without its appendices, or paste the section you want checked.")
+        elif len(text) > settings.max_text_chars:
             raise HTTPException(413, f"That text is longer than {settings.max_text_chars:,} characters. "
-                                     "Check one section at a time.")
+                                     "Check one section at a time, or upload the paper as a PDF.")
         limit(user, "draft", settings.draft_checks_per_minute)
         agent = get_agent()
         plan = agent.plan(text)
@@ -195,7 +251,7 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
             return {"plan": "discover", "message": "I found no citations in this text. It looks like a research "
                     "direction: try Find papers instead."}
         options = dict(options, max_citations=min(int(options.get("max_citations", 20)), settings.max_citations),
-                       source=kind_input)
+                       source=kind_input, references_box=bool(references.strip()), **model_options())
         run_id = store.create_run(user, "draft_check", text, options)
 
         def finished(job, report, seconds, error):
@@ -207,7 +263,7 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
     @app.post("/api/check-draft")
     def check_draft(body: DraftIn, user: dict = Depends(current)):
         return start_check(user, body.text, {"read_full_text": body.read_full_text, "suggest": body.suggest,
-                                             "max_citations": body.max_citations}, "text")
+                                             "max_citations": body.max_citations}, "text", body.references)
 
     @app.post("/api/check-pdf")
     async def check_pdf_upload(file: UploadFile = File(...), read_full_text: bool = Form(True),
@@ -217,14 +273,20 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
         if len(data) > settings.max_pdf_bytes:
             raise HTTPException(413, "That PDF is too large. Upload a smaller file or paste the text.")
         try:
-            verdict = check_pdf(data)
+            pages = extract_page_texts(data)          # read once; the check and the text come from the same pass
         except PdfRejected as e:
             raise HTTPException(422, str(e))
+        verdict = assess_pages(pages)
         if not verdict.accepted:
             store.add_event(user, "pdf_rejected", {"kind": verdict.kind, "pages": verdict.n_pages}, None)
             raise HTTPException(422, verdict.user_message())
-        pages = extract_page_texts(data)
-        text = "\n".join(pages[i] for i in verdict.text_pages)
+        if verdict.n_pages > settings.max_pdf_pages:
+            store.add_event(user, "pdf_too_long", {"pages": verdict.n_pages}, None)
+            raise HTTPException(413, f"That PDF has {verdict.n_pages} pages; CiteCheck reads up to "
+                                     f"{settings.max_pdf_pages}. Upload the paper without its appendices, or paste "
+                                     "the section you want checked.")
+        cleaned = clean_page_texts(pages)             # running headers, footers and line-end hyphens removed
+        text = "\n".join(cleaned[i] for i in verdict.text_pages)
         out = start_check(user, text, {"read_full_text": read_full_text, "suggest": suggest,
                                        "max_citations": max_citations}, "pdf")
         out["pdf"] = {"kind": verdict.kind, "pages": verdict.n_pages, "read_pages": len(verdict.text_pages),
@@ -241,7 +303,7 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
     @app.post("/api/recheck")
     def recheck(body: RecheckIn, user: dict = Depends(current)):
         if not body.abstract.strip():
-            raise HTTPException(422, "Paste the abstract first.")
+            raise HTTPException(422, f"Paste the {body.kind} first.")
         run = store.get_run(body.run_id, user["id"])
         if run is None or not run.get("report"):
             raise HTTPException(404, "Check not found (it may still be running).")
@@ -250,10 +312,12 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
         pos = next((i for i, c in enumerate(cits) if c.get("index") == body.citation_index), None)
         if pos is None:
             raise HTTPException(404, "Citation not found in that check.")
-        new = get_agent().recheck_with_abstract(cits[pos], body.title, body.abstract)
+        was = (cits[pos].get("verdict") or {}).get("label", "none")
+        new = get_agent().recheck_with_abstract(cits[pos], body.title, body.abstract, kind=body.kind)
         cits[pos] = new
         store.update_report(body.run_id, user["id"], rep, summarize(rep))
-        store.add_event(user, "abstract_pasted", {"citation": body.citation_index, "verdict": new["verdict"]["label"]}, None)
+        store.add_event(user, f"{body.kind}_pasted",
+                        {"citation": body.citation_index, "verdict": new["verdict"]["label"], "was": was}, None)
         return {"citation": new, "summary": summarize(rep)}
 
     # ---- single claim, discovery ------------------------------------------------------------------------
@@ -273,7 +337,8 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
                 raise HTTPException(422, "Give the paper's DOI, arXiv id or link, or paste its abstract.")
         except IngestError as e:
             raise HTTPException(422, str(e))
-        run_id = store.create_run(user, "claim_check", claim, {"source": "abstract" if body.abstract.strip() else "identifier"})
+        source = "abstract" if body.abstract.strip() else "identifier"
+        run_id = store.create_run(user, "claim_check", claim, {"source": source, **model_options()})
         t0 = time.time()
         a = copy.copy(agent)
         a.escalate = body.read_full_text
@@ -307,8 +372,18 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
     # ---- feedback, activity, history ------------------------------------------------------------------------
     @app.post("/api/feedback")
     def feedback(body: FeedbackIn, user: dict = Depends(current)):
-        store.add_feedback(user, body.run_id, body.citation_index, body.agrees, body.comment)
-        return {"ok": True, "comment_stored": bool(body.comment.strip() and user["consent_text"])}
+        label, agrees = judgement(body.kind, body.label, body.agrees)
+        limit(user, "feedback", 120)
+        fid = store.add_feedback(user, body.run_id, body.citation_index, agrees, body.comment, kind=body.kind,
+                                 label=label, item_id=body.item_id.strip()[:200])
+        return {"ok": True, "id": fid, "comment_stored": bool(body.comment.strip() and user["consent_text"])}
+
+    @app.post("/api/feedback/{feedback_id}")
+    def refine_feedback(feedback_id: int, body: FeedbackUpdateIn, user: dict = Depends(current)):
+        label, agrees = judgement("citation", body.label, False) if body.label is not None else (None, None)
+        if not store.update_feedback(feedback_id, user, agrees=agrees, label=label, comment=body.comment):
+            raise HTTPException(404, "Not found.")
+        return {"ok": True, "comment_stored": bool((body.comment or "").strip() and user["consent_text"])}
 
     @app.post("/api/events")
     def events(body: EventIn, user: dict = Depends(current)):

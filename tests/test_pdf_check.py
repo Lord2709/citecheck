@@ -77,3 +77,19 @@ def test_real_pdf_bytes_text_vs_scan(tmp_path):
 def test_not_a_pdf_gives_friendly_error():
     with pytest.raises(pc.PdfRejected, match="could not open"):
         pc.check_pdf(b"this is not a pdf at all")
+
+
+def test_running_headers_footers_and_page_numbers_are_removed():
+    words = ["alpha", "beta", "gamma", "delta", "epsilon"]
+    pages = [f"Procedia Computer Science 151 (2019) {1000 + i}-1012\nS. Author et al.\nThe {w} result holds [{i}].\n"
+             f"Then {w} again in 3 trials.\n{i}" for i, w in enumerate(words, 1)]
+    cleaned = pc.clean_page_texts(pages)
+    assert all("Procedia" not in p and "Author et al" not in p for p in cleaned)
+    assert cleaned[1] == "The beta result holds [2].\nThen beta again in 3 trials."   # the page number went too
+    two = pc.clean_page_texts(["Journal X\nBody [1].", "Journal X\nMore [2]."])      # too few pages to tell
+    assert two[0].startswith("Journal X")
+
+
+def test_words_split_across_lines_are_joined_but_compounds_keep_their_hyphen():
+    out = pc.clean_page_texts(["The evalu-\nation of self-\nsupervised models [1]. New-\nYork stays."])[0]
+    assert "evaluation of self-supervised models [1]." in out and "New-\nYork" in out

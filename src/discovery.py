@@ -27,16 +27,26 @@ from .text_utils import split_sentences, tokenize
 
 DEFAULT_SOURCES = ("openalex", "s2", "arxiv")
 MAX_QUERY_TERMS = 8
+ARXIV_TERMS, ARXIV_RETRY_TERMS = 5, 3   # arXiv needs EVERY term to match: few terms first, fewer if that finds little
+# Words people use to describe their work that say nothing about its topic ("I am working on ... and looking for a
+# good opening to frame my research direction").  Searching for them, arXiv in particular, finds almost nothing.
+FILLER = frozenset("""
+    working work worked works looking look looked want wanted wants trying try tried hoping hope research direction
+    directions field fields area areas topic topics good great better opening openings help helps helping frame framing
+    dive deeper further now currently including include includes included interested interest explore exploring know
+    like make get find understand something things thing way ways lot lots kind really idea ideas project thesis paper
+    papers new crucial important contains contain containing real
+""".split())
 
 
 # ----------------------------------------------------------------------------------------------
 # Queries
 # ----------------------------------------------------------------------------------------------
 def build_query(text: str, max_terms: int = MAX_QUERY_TERMS) -> str:
-    """Content words of the direction (or claim), in order, without duplicates or stopwords."""
+    """Content words of the direction (or claim), in order, without duplicates, stopwords or filler words."""
     seen, words = set(), []
     for w in tokenize(text or "", stem=False):
-        if len(w) > 1 and w not in seen:
+        if len(w) > 1 and w not in seen and w not in FILLER:
             seen.add(w)
             words.append(w)
     return " ".join(words[:max_terms])
@@ -193,10 +203,16 @@ class PaperSearch:
                        {"query": query, "limit": n, "fields": "title,abstract,year,venue,externalIds,url"})
             return parse_s2(r.json()) if r is not None else []
         if source == "arxiv":
-            terms = query.split()[:6]
-            r = f._get("http://export.arxiv.org/api/query",
-                       {"search_query": " AND ".join(f"all:{t}" for t in terms), "max_results": n})
-            return parse_arxiv(r.text) if r is not None else []
+            def ask(terms):
+                r = f._get("http://export.arxiv.org/api/query",
+                           {"search_query": " AND ".join(f"all:{t}" for t in terms), "max_results": n})
+                return parse_arxiv(r.text) if r is not None else []
+            terms = query.split()
+            found = ask(terms[:ARXIV_TERMS])
+            if len(found) < min(n, 5) and len(terms) > ARXIV_RETRY_TERMS:   # too strict: ask again with fewer words
+                ids = {p.paper_id for p in found}
+                found += [p for p in ask(terms[:ARXIV_RETRY_TERMS]) if p.paper_id not in ids]
+            return found
         raise ValueError(f"unknown source '{source}'")
 
     def search(self, text: str, n: Optional[int] = None) -> SearchResult:

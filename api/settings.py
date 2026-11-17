@@ -7,6 +7,8 @@
   DATABASE_URL             postgresql+psycopg://...  (Supabase connection string); default: a local SQLite file
   CITECHECK_DB_SCHEMA      Postgres schema for our tables (default "citecheck": NOT exposed by Supabase's REST API)
   CITECHECK_ADMIN_EMAILS   comma-separated e-mails allowed to download the anonymised research export
+  CITECHECK_TEAM_EMAILS    comma-separated e-mails of team members; their accounts are flagged as team in the research
+                           export (admins are always flagged too), so user-study numbers count only participants
   CITECHECK_ORIGINS        comma-separated allowed browser origins (CORS); same-origin needs nothing
   CITECHECK_EXPORT_SALT    salt for hashing user ids in the research export (set it in production)
 """
@@ -28,10 +30,13 @@ class Settings:
     database_url: str = "sqlite:///data/cache/citecheck_web.db"
     db_schema: str = "citecheck"
     admin_emails: list = field(default_factory=list)
+    team_emails: list = field(default_factory=list)
     origins: list = field(default_factory=list)
     export_salt: str = "citecheck-dev-salt"
-    max_text_chars: int = 60_000
+    max_text_chars: int = 60_000      # pasted text: about 8-10 pages
     max_pdf_bytes: int = 15_000_000
+    max_pdf_chars: int = 400_000      # a whole paper with its reference list; only the first citations are checked
+    max_pdf_pages: int = 80
     max_citations: int = 30
     draft_checks_per_minute: int = 6
     searches_per_minute: int = 20
@@ -46,6 +51,7 @@ def load_settings() -> Settings:
     s.database_url = os.environ.get("DATABASE_URL", s.database_url)
     s.db_schema = os.environ.get("CITECHECK_DB_SCHEMA", s.db_schema)
     s.admin_emails = [e.lower() for e in _list("CITECHECK_ADMIN_EMAILS")]
+    s.team_emails = [e.lower() for e in _list("CITECHECK_TEAM_EMAILS")]
     s.origins = _list("CITECHECK_ORIGINS")
     s.export_salt = os.environ.get("CITECHECK_EXPORT_SALT", s.export_salt)
     if s.auth_mode == "supabase" and not (s.supabase_url and s.supabase_anon_key):

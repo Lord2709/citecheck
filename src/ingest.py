@@ -6,7 +6,13 @@ Sources (all free):
                          small daily allowance, with a free key ($1/day of credit) single-work lookups like ours are free.
                          Set OPENALEX_API_KEY to send the key (developers.openalex.org/api-reference/authentication).
   * arXiv export API     abstract by arXiv id
-  * Semantic Scholar     fallback metadata + the reference list WITH citing sentences (`contexts`)
+  * Semantic Scholar     fallback metadata + the reference list WITH citing sentences (`contexts`); its key is sent to
+                         Semantic Scholar only
+  * Crossref             fallback for the abstract (JATS markup), which many publishers deposit there
+  * Europe PMC           last fallback for the abstract of papers indexed in PubMed
+                         (docs/live_checks/2026-11-17_source_coverage.md measured what each source adds)
+A source that is busy (HTTP 429) no longer ends the lookup: the next source is tried, and "not responding" is reported
+only when no source had the abstract.
 
 NOT VERIFIED LIVE from the build sandbox (it had no route to these hosts): the response shapes below follow each
 API's documentation and are covered by tests with hand-written fixtures.  Before relying on this:
@@ -18,6 +24,7 @@ always works and is what the user tests should fall back to.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -137,10 +144,10 @@ class Fetcher:
         self.timeout, self.retries, self._sleep = timeout, retries, sleep
 
     # ---- HTTP -----------------------------------------------------------------------------
-    def _headers(self):
+    def _headers(self, url: str = ""):
         ua = "CiteCheck-course-project/0.2" + (f" (mailto:{self.mailto})" if self.mailto else "")
         h = {"User-Agent": ua}
-        if self.s2_key:
+        if self.s2_key and "api.semanticscholar.org" in (url or ""):   # never send the key to another host
             h["x-api-key"] = self.s2_key
         return h
 
@@ -149,7 +156,7 @@ class Fetcher:
         last = None
         for attempt in range(self.retries):
             try:
-                r = self.session.get(url, params=params, headers=self._headers(), timeout=self.timeout)
+                r = self.session.get(url, params=params, headers=self._headers(url), timeout=self.timeout)
             except Exception as e:  # network down, DNS, timeout...
                 last = f"network error: {type(e).__name__}"
                 self._sleep(2 ** attempt * 0.5)
@@ -216,6 +223,37 @@ class Fetcher:
             url=f"https://arxiv.org/abs/{aid}", source="arxiv",
         )
 
+    def _crossref(self, doi: str) -> Optional[Paper]:
+        """Crossref carries the abstract for many publishers that OpenAlex and Semantic Scholar lack (JATS markup)."""
+        r = self._get(f"https://api.crossref.org/works/{doi}", {"mailto": self.mailto} if self.mailto else None)
+        if r is None:
+            return None
+        m = (r.json() or {}).get("message") or {}
+        abstract = html.unescape(re.sub(r"<[^>]+>", " ", m.get("abstract") or ""))
+        abstract = re.sub(r"^\s*abstract\b[:.]?\s*", "", re.sub(r"\s+", " ", abstract).strip(), flags=re.I)
+        parts = ((m.get("issued") or {}).get("date-parts") or [[None]])[0]
+        return Paper(paper_id=f"doi:{doi}", title=((m.get("title") or [""])[0] or "").strip(), abstract=abstract,
+                     year=parts[0] if parts else None, venue=((m.get("container-title") or [None])[0]),
+                     doi=doi, url=f"https://doi.org/{doi}", source="crossref")
+
+    def _europepmc(self, doi: str) -> Optional[Paper]:
+        """Europe PMC has the abstract of papers indexed in PubMed (seen 2026-11-17: Nature's "Deep learning", 2015,
+        which no other free source returned)."""
+        r = self._get("https://www.ebi.ac.uk/europepmc/webservices/rest/search",
+                      {"query": f'DOI:"{doi}"', "format": "json", "resultType": "core"})
+        if r is None:
+            return None
+        hits = ((r.json() or {}).get("resultList") or {}).get("result") or []
+        if not hits:
+            return None
+        h = hits[0]
+        abstract = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", h.get("abstractText") or ""))).strip()
+        year = h.get("pubYear")
+        return Paper(paper_id=f"doi:{doi}", title=(h.get("title") or "").strip().rstrip("."), abstract=abstract,
+                     year=int(year) if str(year or "").isdigit() else None,
+                     venue=((h.get("journalInfo") or {}).get("journal") or {}).get("title"),
+                     doi=doi, url=f"https://doi.org/{doi}", source="europepmc")
+
     def _s2_paper(self, key: str) -> Optional[Paper]:
         r = self._get(f"https://api.semanticscholar.org/graph/v1/paper/{key}",
                       {"fields": "title,abstract,year,venue,externalIds,url"})
@@ -240,9 +278,19 @@ class Fetcher:
         paper = None
         if pid.kind == "doi":
             paper = self._openalex(pid.value)
-            if paper is None or not usable_abstract(paper.abstract):
-                alt = self._s2_paper(f"DOI:{pid.value}")
+            busy = None                       # a source that did not answer: say so only if no source had the abstract
+            for fallback in (lambda: self._s2_paper(f"DOI:{pid.value}"), lambda: self._crossref(pid.value),
+                             lambda: self._europepmc(pid.value)):
+                if paper is not None and usable_abstract(paper.abstract):
+                    break
+                try:
+                    alt = fallback()
+                except IngestError as e:
+                    busy = busy or e
+                    continue
                 paper = alt if alt and usable_abstract(alt.abstract) else (paper or alt)
+            if busy is not None and (paper is None or not usable_abstract(paper.abstract)):
+                raise busy
         elif pid.kind == "arxiv":
             paper = self._arxiv(pid.value)
             if paper is None or not usable_abstract(paper.abstract):

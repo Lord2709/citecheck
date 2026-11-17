@@ -199,3 +199,53 @@ def test_citation_string_everywhere_is_refused_and_not_cached(tmp_path):
     with pytest.raises(IngestError, match="citation details"):
         f.fetch_paper("10.18653/v1/2020.emnlp-main.609")
     assert not list(tmp_path.glob("cache/*.json"))                       # a refused paper is not cached
+
+
+def test_the_semantic_scholar_key_is_sent_to_semantic_scholar_only():
+    from src.ingest import Fetcher
+
+    f = Fetcher(session=object(), cache_dir=None, s2_api_key="KEY")
+    assert f._headers("https://api.semanticscholar.org/graph/v1/paper/x")["x-api-key"] == "KEY"
+    for url in ("https://api.openalex.org/works/x", "https://api.crossref.org/works", "https://arxiv.org/pdf/1",
+                "https://publisher.example/paper.pdf"):
+        assert "x-api-key" not in f._headers(url)
+
+
+CROSSREF = {"message": {"title": ["Underwater acoustic sensor networks: research challenges"],
+                        "container-title": ["Ad Hoc Networks"],
+                        "issued": {"date-parts": [[2005, 5]]},
+                        "abstract": "<jats:title>Abstract</jats:title><jats:p>Underwater sensor nodes &amp; vehicles "
+                                    "must cooperate over acoustic links with long delays.</jats:p>"}}
+
+
+def test_crossref_abstract_when_openalex_and_s2_have_none(tmp_path):
+    no_abs = dict(OPENALEX, abstract_inverted_index=None)
+    f = fetcher([("openalex.org", Resp(200, no_abs)), ("semanticscholar.org", Resp(404)),
+                 ("api.crossref.org", Resp(200, CROSSREF))], tmp_path)
+    p = f.fetch_paper("10.1016/j.adhoc.2005.01.004")
+    assert p.source == "crossref" and p.year == 2005 and p.venue == "Ad Hoc Networks"
+    assert p.abstract == "Underwater sensor nodes & vehicles must cooperate over acoustic links with long delays."
+
+
+def test_a_busy_semantic_scholar_does_not_end_the_lookup(tmp_path):
+    no_abs = dict(OPENALEX, abstract_inverted_index=None)
+    f = fetcher([("openalex.org", Resp(200, no_abs)), ("semanticscholar.org", Resp(429)),
+                 ("api.crossref.org", Resp(200, CROSSREF))], tmp_path)
+    assert f.fetch_paper("10.1016/j.adhoc.2005.01.004").source == "crossref"     # before: "not responding (HTTP 429)"
+    g = fetcher([("openalex.org", Resp(200, no_abs)), ("semanticscholar.org", Resp(429)),
+                 ("api.crossref.org", Resp(404))], tmp_path / "g")
+    with pytest.raises(IngestError, match="not responding"):                        # nobody had it: say who was busy
+        g.fetch_paper("10.1016/j.adhoc.2005.01.004")
+
+
+def test_europepmc_abstract_is_the_last_fallback(tmp_path):
+    no_abs = dict(OPENALEX, abstract_inverted_index=None)
+    epmc = {"resultList": {"result": [{"title": "Deep learning.", "pubYear": "2015",
+                                       "journalInfo": {"journal": {"title": "Nature"}},
+                                       "abstractText": "Deep learning allows <b>computational models</b> that are "
+                                                       "composed of multiple processing layers to learn."}]}}
+    f = fetcher([("openalex.org", Resp(200, no_abs)), ("semanticscholar.org", Resp(404)), ("api.crossref.org", Resp(404)),
+                 ("europepmc", Resp(200, epmc))], tmp_path)
+    p = f.fetch_paper("10.1038/nature14539")
+    assert p.source == "europepmc" and p.title == "Deep learning" and p.year == 2015 and p.venue == "Nature"
+    assert p.abstract.startswith("Deep learning allows computational models that")

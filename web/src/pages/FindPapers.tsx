@@ -5,6 +5,41 @@ import type { DiscoveryReport } from "../types";
 
 const SOURCE_NAME: Record<string, string> = { openalex: "OpenAlex", s2: "Semantic Scholar", arxiv: "arXiv", corpus: "SciFact" };
 
+type Relevance = "RELEVANT" | "NOT_RELEVANT";
+
+// "Useful for your direction?" on one result, saved on the click: these answers are the relevance labels the ranking
+// has never had.
+function Relevant({ runId, rank, paperId }: { runId?: string; rank: number; paperId: string }) {
+  const [answer, setAnswer] = useState<Relevance | null>(null);
+  const [error, setError] = useState(false);
+  if (!runId) return null;
+
+  async function choose(a: Relevance) {
+    setAnswer(a);
+    setError(false);
+    try {
+      await post("/api/feedback", { run_id: runId, kind: "paper", citation_index: rank, item_id: paperId, label: a });
+      track("paper_feedback", { rank, relevant: a === "RELEVANT" });
+    } catch {
+      setError(true);
+      setAnswer(null);
+    }
+  }
+
+  return (
+    <div className="feedback">
+      <span className="muted">Relevant to your direction?</span>
+      {(["RELEVANT", "NOT_RELEVANT"] as Relevance[]).map((a) => (
+        <button key={a} className={`chip ${answer === a ? "chip-on" : ""}`} aria-pressed={answer === a} onClick={() => choose(a)}>
+          {a === "RELEVANT" ? "Yes" : "No"}
+        </button>
+      ))}
+      {answer && <span className="muted small">Saved.</span>}
+      {error && <span className="error small">Could not save. Please try again.</span>}
+    </div>
+  );
+}
+
 export default function FindPapers() {
   const [direction, setDirection] = useState("");
   const [k, setK] = useState(10);
@@ -51,13 +86,16 @@ export default function FindPapers() {
 
       {rep && !busy && (
         <section className="results">
-          {Object.entries(rep.errors).map(([s, m]) => (
-            <div key={s} className="banner">{SOURCE_NAME[s] ?? s} didn't answer this time ({m.split(":")[0]}). Showing results from the others.</div>
-          ))}
-          {rep.results.length === 0 && <p className="muted">No papers found. Try fewer or more general words.</p>}
+          {Object.keys(rep.errors).length > 0 && (
+            <div className="banner">
+              {Object.keys(rep.errors).map((s) => SOURCE_NAME[s] ?? s).join(" and ")} didn't answer this time
+              {rep.results.length ? ", so these results come from the other sources." : "."}
+            </div>
+          )}
+          {rep.results.length === 0 && <p className="muted">No papers found. Try a few specific words, such as “brain age MRI UK Biobank”.</p>}
           <ol className="papers">
             {rep.results.map((c, i) => (
-              <li key={i} className="card paper">
+              <li key={`${rep.run_id ?? ""}-${i}`} className="card paper">
                 <div className="paper-top">
                   <span className={`pill ${c.band.startsWith("likely relevant") ? "ok" : c.band.startsWith("maybe") ? "warn" : "muted"}`}>{c.band}</span>
                   <span className="muted small">{c.sources.map((s) => SOURCE_NAME[s] ?? s).join(" · ")}</span>
@@ -68,6 +106,7 @@ export default function FindPapers() {
                 {c.matched_terms.length > 0 && (
                   <div className="terms">{c.matched_terms.slice(0, 8).map((t) => <span key={t} className="tag">{t}</span>)}</div>
                 )}
+                <Relevant runId={rep.run_id} rank={i + 1} paperId={c.paper.paper_id} />
               </li>
             ))}
           </ol>

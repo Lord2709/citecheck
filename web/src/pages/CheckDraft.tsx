@@ -5,10 +5,9 @@ import Results from "../components/Results";
 import { track } from "../track";
 import type { Citation, Job, Summary } from "../types";
 
-const EXAMPLE = `Transformer models rely entirely on attention and dispense with recurrence and convolutions [1]. SciFact pairs expert-written scientific claims with abstracts that contain the evidence for them [2]. Deep learning methods learn representations of data with multiple levels of abstraction [3]. Attention-only models are always slower to train than recurrent ones [1]. The base Transformer model uses 8 parallel attention heads [1].
+const EXAMPLE_TEXT = `Transformer models rely entirely on attention and dispense with recurrence and convolutions [1]. SciFact pairs expert-written scientific claims with abstracts that contain the evidence for them [2]. Deep learning methods learn representations of data with multiple levels of abstraction [3]. Attention-only models are always slower to train than recurrent ones [1]. The base Transformer model uses 8 parallel attention heads [1].`;
 
-References
-[1] Vaswani et al. Attention Is All You Need. NeurIPS 2017. arXiv:1706.03762
+const EXAMPLE_REFS = `[1] Vaswani et al. Attention Is All You Need. NeurIPS 2017. arXiv:1706.03762
 [2] Wadden et al. Fact or Fiction: Verifying Scientific Claims. EMNLP 2020. doi:10.18653/v1/2020.emnlp-main.609
 [3] LeCun, Bengio and Hinton. Deep learning. Nature 2015. doi:10.1038/nature14539`;
 
@@ -17,6 +16,7 @@ type Mode = "paste" | "pdf";
 export default function CheckDraft() {
   const [mode, setMode] = useState<Mode>("paste");
   const [text, setText] = useState("");
+  const [refs, setRefs] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [fullText, setFullText] = useState(true);
@@ -51,13 +51,13 @@ export default function CheckDraft() {
     setError("");
     setInfo("");
     setJob(null);
-    if (mode === "paste" && !text.trim()) return setError("Paste your text, including its reference list, first.");
+    if (mode === "paste" && !text.trim()) return setError("Paste your text, with its citations, first.");
     if (mode === "pdf" && !file) return setError("Choose a PDF first.");
     setStarting(true);
     try {
       let r: { plan: string; job_id?: string; message?: string; pdf?: { note: string } };
       if (mode === "paste") {
-        r = await post("/api/check-draft", { text, read_full_text: fullText, suggest });
+        r = await post("/api/check-draft", { text, references: refs, read_full_text: fullText, suggest });
       } else {
         const f = new FormData();
         f.append("file", file as File);
@@ -66,7 +66,7 @@ export default function CheckDraft() {
         r = await postForm("/api/check-pdf", f);
         if (r.pdf?.note) setInfo(r.pdf.note);
       }
-      track("check_started", { source: mode, full_text: fullText, suggest });
+      track("check_started", { source: mode, full_text: fullText, suggest, references_box: mode === "paste" && !!refs.trim() });
       if (r.plan === "discover") {
         setInfo(r.message ?? "");
         return;
@@ -98,7 +98,7 @@ export default function CheckDraft() {
     <div className="page">
       <div className="page-head">
         <h1>Check a draft</h1>
-        <p className="lead">Paste a paragraph or a whole section <strong>with its reference list</strong>. CiteCheck finds every cited sentence, reads the paper behind it, and tells you whether it backs you up.</p>
+        <p className="lead">Paste a paragraph or a whole section, and <strong>its reference list</strong> in the second box. CiteCheck finds every cited sentence, reads the paper behind it, and tells you whether it backs you up.</p>
       </div>
 
       <section className="card composer">
@@ -109,11 +109,15 @@ export default function CheckDraft() {
 
         {mode === "paste" ? (
           <>
-            <textarea className="draft" value={text} onChange={(e) => setText(e.target.value)} rows={12} aria-label="Your draft"
-                      placeholder={"…reduces infection rates in adults [1].\n\nReferences\n[1] Author et al. Title. Venue 2020. doi:10.…"} />
+            <label className="field-label" htmlFor="draft-text">Your text, with its citations</label>
+            <textarea id="draft-text" className="draft" value={text} onChange={(e) => setText(e.target.value)} rows={10}
+                      placeholder="…reduces infection rates in adults [1]. Earlier trials found no effect (Smith et al., 2020)." />
+            <label className="field-label refs-label" htmlFor="draft-refs">Reference list</label>
+            <textarea id="draft-refs" className="refs" value={refs} onChange={(e) => setRefs(e.target.value)} rows={5}
+                      placeholder={"[1] Author et al. Title. Venue 2020. doi:10.…\nSmith, J., Lee, K. (2020). Title. Journal."} />
             <div className="composer-meta">
-              <button className="link-btn" onClick={() => { setText(EXAMPLE); track("example_loaded", {}); }}>Try an example with real papers</button>
-              <span className="muted small">Citations like [1], [2–4] or (Smith et al., 2020).{text ? ` ${text.length.toLocaleString()} characters.` : ""}</span>
+              <button className="link-btn" onClick={() => { setText(EXAMPLE_TEXT); setRefs(EXAMPLE_REFS); track("example_loaded", {}); }}>Try an example with real papers</button>
+              <span className="muted small">Citations like [1], [2–4] or (Smith et al., 2020). Start each reference on a new line; no “References” heading needed.{text ? ` ${(text.length + refs.length).toLocaleString()} characters.` : ""}</span>
             </div>
           </>
         ) : (

@@ -22,7 +22,8 @@ DRAFT = {"kind": "draft_check", "warnings": ["Checked the first 2 of 3 citations
 def test_summary_and_rows():
     s = report.summarize(DRAFT)
     assert s == {"citations": 3, "supported": 1, "contradicted": 1, "not_enough_evidence": 0, "could_not_check": 1,
-                 "needs_attention": 2, "read_full_text": 1, "with_suggestion": 1}
+                 "needs_attention": 2, "read_full_text": 1, "with_suggestion": 1, "abstract_only": 1,
+                 "no_free_full_text": 0, "free_copy_refused": 0}
     rows = report.table_rows(DRAFT)
     assert rows[1]["Suggestion"] == "Paper C" and rows[2]["Outcome"] == "Could not check" and rows[2]["Note"]
 
@@ -50,3 +51,26 @@ def test_confidence_display_and_no_run_on_lines():
     assert lines[i + 1] == "" and lines[i + 2].startswith("**Paper read:**")      # fields are separate paragraphs
     assert "confidence 0.91" in md and report.CONF_NOTE in md
     assert report.table_rows(DRAFT)[0]["Confidence"] == "0.91"
+
+
+def test_abstract_only_verdicts_are_said_plainly():
+    nei = {"index": 4, "marker": "[4]", "sentence": "It cuts energy use by 37% [4].",
+           "claim": "It cuts energy use by 37%.",
+           "status": "checked", "paper": {"title": "Paper D"}, "read_full_text": False,
+           "verdict": {"label": "NEI", "display_label": "NOT ENOUGH EVIDENCE", "confidence": 0.9, "evidence": []},
+           "suggestions": [], "steps": [{"action": "verify abstract", "detail": "NOT ENOUGH EVIDENCE"},
+                                        {"action": "find open-access full text",
+                                         "detail": "Unpaywall: not open access (paywalled)"}]}
+    d = dict(DRAFT, citations=DRAFT["citations"] + [nei])
+    assert report.ft_status(nei) == "not_found" and report.display_outcome(nei) == "Not in the abstract"
+    s = report.summarize(d)
+    assert s["abstract_only"] == 2 and s["no_free_full_text"] == 1
+    md = report.to_markdown(d)
+    assert "## 4. Not in the abstract" in md and "abstracts rarely include them" in md
+    assert "2 of 3 verdicts rest on the abstract alone, and for 1 of them no free full text exists" in md
+    pasted = dict(nei, abstract_pasted=True, pasted_kind="passage", full_text_status="pasted")
+    assert report.display_outcome(pasted) == "Not enough evidence" and not report.abstract_only(pasted)
+    confident = dict(nei, verdict=dict(nei["verdict"], label="SUPPORT"),
+                     steps=[{"action": "read full text?",
+                             "detail": "not needed: confident on the abstract (SUPPORTS)"}])
+    assert report.ft_status(confident) == "not_needed" and report.display_outcome(confident) == "Supported"

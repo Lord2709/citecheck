@@ -22,8 +22,22 @@ function Protected({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// A link like /?code=P04 (from the team, for a user study) prefills the study code on the consent screen.
+function keepStudyCode(search: string) {
+  const code = new URLSearchParams(search).get("code");
+  if (!code || !/^[A-Za-z0-9-]{1,16}$/.test(code)) return;
+  try {
+    sessionStorage.setItem("cc_code", code.toUpperCase());
+  } catch {
+    /* storage blocked: the participant types the code instead */
+  }
+}
+
+keepStudyCode(window.location.search);   // at once, before any redirect can drop the query string
+
 export default function App() {
   const loc = useLocation();
+  useEffect(() => keepStudyCode(loc.search), [loc.search]);
   useEffect(() => {
     track("page_view", { page: loc.pathname.split("/")[1] || "home" });
   }, [loc.pathname]);

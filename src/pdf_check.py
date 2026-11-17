@@ -111,6 +111,56 @@ def extract_page_texts(pdf: Union[str, bytes, "io.BufferedIOBase"]) -> list:
         raise PdfRejected("We could not open this file as a PDF. Please check the file, or paste the text instead.") from e
 
 
+EDGE_LINES = 2              # lines at the top and bottom of a page where running headers and footers sit
+REPEAT_SHARE = 0.5          # a line repeated at a page edge on at least this share of pages is a header or footer
+PAGE_NUMBER = re.compile(r"^\s*(?:page\s*)?\d{1,4}(?:\s*(?:of|/)\s*\d{1,4})?\s*$", re.I)
+HYPHEN_BREAK = re.compile(r"([A-Za-z]{2,})-\n([a-z]{2,})")
+# Words that usually start a hyphenated compound: "self-\nsupervised" stays "self-supervised"; "evalu-\nation" is
+# joined into one word.
+COMPOUND_HEADS = frozenset("self non multi cross semi well state end high low large small real long short fine pre "
+                           "post co anti inter intra over under sub".split())
+
+
+def _join_hyphen(m) -> str:
+    head, tail = m.group(1), m.group(2)
+    return f"{head}-{tail}" if head.lower() in COMPOUND_HEADS else head + tail
+
+
+CITATION_MARK = re.compile(r"\[\d")
+
+
+def _edge_key(line: str) -> str:
+    """A header seen on several pages differs only in its numbers ("Procedia 00 (2019) 123-130").  A line with a
+    citation marker is body text, never a header."""
+    if CITATION_MARK.search(line):
+        return ""
+    return re.sub(r"\d+", "#", line.strip().lower())
+
+
+def clean_page_texts(page_texts: Sequence) -> list:
+    """The pages' text without running headers, footers and page numbers, with words split across lines joined.
+
+    A paper's running header ("Journal of X 12 (2019) 345-356", "Author et al.") would otherwise be read as part of
+    the sentences around it, and "evalu-\nation" would never match the paper's "evaluation"."""
+    pages = [(t or "").splitlines() for t in page_texts]
+    n = len(pages)
+    counts = {}
+    if n >= 3:
+        for lines in pages:
+            edges = {_edge_key(x) for x in lines[:EDGE_LINES] + lines[-EDGE_LINES:] if x.strip()} - {""}
+            for k in edges:
+                counts[k] = counts.get(k, 0) + 1
+    repeated = {k for k, c in counts.items() if c >= max(3, REPEAT_SHARE * n)}
+    out = []
+    for lines in pages:
+        last = len(lines) - 1
+        at_edge = lambda i: i < EDGE_LINES or i > last - EDGE_LINES  # noqa: E731
+        kept = [x for i, x in enumerate(lines)
+                if not (at_edge(i) and (_edge_key(x) in repeated or PAGE_NUMBER.match(x)))]
+        out.append(HYPHEN_BREAK.sub(_join_hyphen, "\n".join(kept)))
+    return out
+
+
 def check_pdf(pdf) -> PdfAssessment:
     """Assess an uploaded PDF (path, bytes or file object).  Callers refuse it when `not result.accepted`."""
     return assess_pages(extract_page_texts(pdf))
