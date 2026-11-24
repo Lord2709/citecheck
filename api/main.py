@@ -8,6 +8,7 @@ Every endpoint except /api/health and /api/config needs a signed-in user (see ap
 from __future__ import annotations
 
 import copy
+import os
 import re
 import threading
 from contextlib import asynccontextmanager
@@ -196,7 +197,10 @@ def create_app(settings: Optional[Settings] = None, agent_factory: Optional[Call
     # ---- public ------------------------------------------------------------------------------------
     @app.get("/api/health")
     def health():
-        return {"ok": True, "model_loaded": state["agent"] is not None, "model_error": state["error"]}
+        # Whether the free paper-search keys are set (never their values): without them OpenAlex and Semantic Scholar
+        # often refuse the site's shared cloud address, and paper search falls back to arXiv alone.
+        keys = {"openalex": bool(os.environ.get("OPENALEX_API_KEY")), "semantic_scholar": bool(os.environ.get("S2_API_KEY"))}
+        return {"ok": True, "model_loaded": state["agent"] is not None, "model_error": state["error"], "search_keys": keys}
 
     @app.get("/api/config")
     def config():
