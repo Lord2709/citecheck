@@ -31,3 +31,7 @@ data/realcite/raw/
 # React site (rebuilt from web/ by npm)
 web/node_modules/
 web/dist/
+
+# The site's research export covers every consenting user; only the summaries from tools/summarize_export.py
+# are committed
+citecheck_research_export_*.json

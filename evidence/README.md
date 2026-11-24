@@ -31,3 +31,23 @@ evidence/
 Outside people who read or cite papers: UMD grad students and RAs in other groups, labmates, friends in research programs.
 Not on our team. Aim for **3 in Session 5**, more later. The lean canvas key assumption is *researchers find evidence-grounded verdicts useful*;
 that is what these sessions test.
+
+## Sessions on the live website (from Session 12)
+
+The website records each check and each "Is this right?" answer for people who agreed to research use, so the usage
+log comes from the site instead of `tools/anonymize_log.py`:
+
+1. Give the participant a study code (P08, P09...) and send them the site link with it: `https://citecheck-877770798089.us-east4.run.app/?code=P08`
+   (the code is filled in on the consent screen; people who signed up earlier can type it on the Account page).
+2. Ask them to check their own text and to answer "Is this right?" on **every** verdict, with the right answer when
+   they say "No". Take notes during the session (`templates/session_notes_TEMPLATE.md`) and a dated screenshot.
+3. After the session, an admin downloads the export from the Account page ("Download the export (JSON)"; keep the
+   file out of the repo) and runs:
+
+   ```
+   python -m tools.summarize_export citecheck_research_export_2026-11-24.json --out evidence/session12 --since 2026-11-23
+   ```
+
+   It keeps people outside the team only, names them by study code, and writes `citations.csv`, `runs.csv`,
+   `summary.md` and `summary.json`. Commit those files, the notes and the screenshots; the export itself has no
+   names or free text, but it covers everyone, so it stays out of the repo.
