@@ -15,7 +15,7 @@ so neither fits. Cloud Run runs the same image unchanged.
 | The site, always on (2 vCPU, 4 GiB, one instance) | about $110 a month **of the credit** |
 | Image builds (Cloud Build) | free (2,500 build-minutes a month) |
 | Image storage (Artifact Registry, ~3 GB) | about $0.25 a month of the credit |
-| Secret Manager (3 secrets) | free |
+| Secret Manager (3 to 6 secrets) | free (the free tier covers 6 secret versions a month) |
 
 **Rules that keep it at $0:** never click **Upgrade** / **Activate full account**. On the trial the card is only
 verified (a temporary authorization hold) and is never charged; when the credit or the 90 days run out, the site
@@ -88,6 +88,38 @@ gcloud builds submit --tag $IMAGE --timeout=3600 && gcloud run deploy citecheck 
 ```
 
 The other settings (secrets, flags) carry over from the previous revision.
+
+## Paper-search keys (OpenAlex, Semantic Scholar)
+
+Without keys, OpenAlex and Semantic Scholar often refuse requests from Cloud Run's shared addresses, and "Find papers"
+falls back to arXiv alone (seen with a participant on 2026-11-17). Both keys are free. The code already reads them
+from `OPENALEX_API_KEY` and `S2_API_KEY` (`src/ingest.py`), and sends the Semantic Scholar key to Semantic Scholar only.
+
+1. **Get the keys.** OpenAlex: sign in at openalex.org and copy the API key from the account settings
+   (developers.openalex.org/api-reference/authentication). Semantic Scholar: request one at
+   semanticscholar.org/product/api; approval can take a few days, so add OpenAlex first if it has not arrived.
+2. **Store them as secrets** (in Cloud Shell; the key is typed, never echoed or saved in history):
+
+```bash
+SA=citecheck-run@citecheck-512817.iam.gserviceaccount.com
+read -rsp "Paste OPENALEX_API_KEY: " V && printf '%s' "$V" | gcloud secrets create OPENALEX_API_KEY --data-file=- && unset V; echo
+read -rsp "Paste S2_API_KEY: " V && printf '%s' "$V" | gcloud secrets create S2_API_KEY --data-file=- && unset V; echo
+for s in OPENALEX_API_KEY S2_API_KEY; do
+  gcloud secrets add-iam-policy-binding $s --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor --quiet
+done
+```
+
+3. **Give them to the site** (a new revision starts with them; the other settings carry over). Leave out the one you
+   do not have yet:
+
+```bash
+gcloud run services update citecheck --update-secrets OPENALEX_API_KEY=OPENALEX_API_KEY:latest,S2_API_KEY=S2_API_KEY:latest
+```
+
+4. **Check.** `curl -s https://citecheck-877770798089.us-east4.run.app/api/health` shows
+   `"search_keys": {"openalex": true, "semantic_scholar": true}` (whether each key is set, never the key itself).
+   Then run one search in "Find papers": the results should list OpenAlex and Semantic Scholar as sources, not only
+   arXiv.
 
 ## Everyday operations
 

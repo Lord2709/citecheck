@@ -298,3 +298,12 @@ def test_paste_a_passage_of_the_paper(tmp_path, fixture_dir):
     assert any(e["event"] == "passage_pasted" and e["props"]["was"] == "none" for e in events)
     bad = c.post("/api/recheck", json={"run_id": start["run_id"], "citation_index": 2, "abstract": "x", "kind": "pdf"})
     assert bad.status_code == 422
+
+
+def test_health_says_whether_search_keys_are_set_without_showing_them(tmp_path, fixture_dir, monkeypatch):
+    monkeypatch.setenv("OPENALEX_API_KEY", "secret-openalex-key")
+    monkeypatch.delenv("S2_API_KEY", raising=False)
+    c, _ = client(tmp_path, fixture_dir)
+    r = c.get("/api/health")
+    assert r.json()["search_keys"] == {"openalex": True, "semantic_scholar": False}
+    assert "secret-openalex-key" not in r.text
