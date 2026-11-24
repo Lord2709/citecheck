@@ -24,6 +24,11 @@ Evidence units (--unit; evaluate with the same run_eval --evidence-unit):
   * sentence : the verifier reads one sentence at a time and the paper takes its most decisive sentence
                (build_sentence_pairs; aggregation in src/evidence.aggregate_sentence_probs)
 
+Contradictions (--contradict-boost B): SciFact train has about half as many CONTRADICT pairs as SUPPORT pairs, and
+the deployed model's weakest class is CONTRADICT (recall 0.625 on dev; none of a participant's 3 planted false claims
+was caught in Session 11).  B multiplies the CONTRADICT weight in the loss on top of --class-weights (1.0 = as
+before), so a missed contradiction costs the model more during training.
+
 Held-out claims: with --split-file (recommended; eval/train_split.py) the model trains on the fit part and the
 calib part is held out, which is where run_eval --tune-split-file ... --tune-part calib tunes tau.  Without it, the
 train claims eval.run_eval tunes tau on by default (run_eval.tau_tuning_claims, same --tune-n and --seed) are LEFT
@@ -217,6 +222,16 @@ def split_claims(a, all_claims, train_path):
     return claims, heldout, info
 
 
+def class_weight_list(counts, idx, n_pairs, mode="auto", contradict_boost=1.0):
+    """Loss weight per label index: inverse class frequency ("auto") or 1 ("none"), then CONTRADICT x boost."""
+    w = [1.0] * len(idx)
+    if mode == "auto":
+        for k, v in counts.items():
+            w[idx[k]] = n_pairs / (3 * max(v, 1))
+    w[idx["contradict"]] *= contradict_boost
+    return w
+
+
 def prepare_pairs(a):
     """Load train, split it, build training and validation pairs.  Never opens dev or test."""
     data_dir = find_scifact_dir(a.data_dir)
@@ -268,6 +283,8 @@ def main(argv=None):
     ap.add_argument("--tune-n", type=int, default=200, help="hold out the claims run_eval tunes tau on (same as its --tune-n)")
     ap.add_argument("--max-steps", type=int, default=None, help="stop early (smoke test)")
     ap.add_argument("--class-weights", default="auto", choices=["auto", "none"])
+    ap.add_argument("--contradict-boost", type=float, default=1.0,
+                    help="multiply the CONTRADICT loss weight by this (1.0 = the deployed model's training)")
     ap.add_argument("--warmup", type=float, default=0.1, help="warmup share of optimizer steps")
     ap.add_argument("--gradient-checkpointing", action="store_true", help="less GPU memory, ~30%% slower (large models)")
     ap.add_argument("--no-amp", action="store_true", help="disable mixed precision on GPU")
@@ -314,10 +331,9 @@ def main(argv=None):
     inv = {v: k for k, v in idx.items()}
     labels = [idx[p[2]] for p in pairs]
 
-    if a.class_weights == "auto":
-        w = torch.zeros(model.config.num_labels)
-        for k, v in counts.items():
-            w[idx[k]] = len(pairs) / (3 * max(v, 1))
+    if a.class_weights == "auto" or a.contradict_boost != 1.0:
+        w = torch.tensor(class_weight_list(counts, idx, len(pairs), a.class_weights, a.contradict_boost))
+        print(f"[loss weights] {dict(zip([inv[i] for i in range(len(w))], [round(float(x), 3) for x in w]))}")
         loss_fn = torch.nn.CrossEntropyLoss(weight=w.to(dev))
     else:
         loss_fn = torch.nn.CrossEntropyLoss()
