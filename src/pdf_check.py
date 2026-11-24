@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Sequence, Union
 
@@ -151,11 +152,57 @@ def own_dois(page_texts: Sequence) -> set:
     return {d for d, c in counts.items() if n >= 3 and c >= max(3, REPEAT_SHARE * n)}
 
 
+# Section headings and the short labels of figures and tables stand on lines of their own in a PDF's text; joined
+# with the next line, they ran into its sentence: "XGBoost model Feature importance score B. Machine Learning models
+# 1) Random Forest: Random Forest (RF) is ..." (a participant's paper, Session 11).  Such a line is closed with a
+# full stop so the sentence splitter keeps it apart.
+NUMBERED_HEADING = re.compile(r"^(?:[IVX]{1,6}\.|[A-Z]\.|\d{1,2}(?:\.\d{1,2}){0,3}\.?|\d{1,2}\))\s+[A-Z][^.!?]*$")
+HEADING_WORDS = 10          # a numbered heading has at most this many words
+LABEL_WORDS = 5             # an unnumbered line this short, between two sentences, is a heading or a figure label
+ENDS_SENTENCE = re.compile(r"[.!?:;)\]]\s*$|[.!?][\"'”’]\s*$")
+STARTS_SENTENCE = re.compile(r"^\s*(?:[A-Z0-9(\[\"“]|$)")
+REFERENCES_LINE = re.compile(r"^\s*(?:\d+\.?\s*)?(?:references|bibliography|works cited|literature cited)\s*:?\s*$", re.I)
+
+
+def _is_heading(line: str, after_break: bool, next_line: str) -> bool:
+    t = line.strip()
+    if not t or ENDS_SENTENCE.search(t) or CITATION_MARK.search(t) or not STARTS_SENTENCE.match(next_line or ""):
+        return False
+    words = len(t.split())
+    if NUMBERED_HEADING.match(t) and words <= HEADING_WORDS:
+        return True
+    return after_break and words <= LABEL_WORDS and t[0].isupper()
+
+
+def close_headings(text: str, in_references: bool = False):
+    """(text, in_references): heading and label lines closed with a full stop, up to the reference list."""
+    lines = text.split("\n")
+    out, after_break = [], True
+    for i, line in enumerate(lines):
+        if in_references or REFERENCES_LINE.match(line):
+            in_references = True
+            out.append(line)
+            continue
+        nxt = next((x for x in lines[i + 1:] if x.strip()), "")
+        if _is_heading(line, after_break, nxt):
+            out.append(line.rstrip() + ".")
+            after_break = True
+            continue
+        out.append(line)
+        if line.strip():
+            after_break = bool(ENDS_SENTENCE.search(line))
+    return "\n".join(out), in_references
+
+
 def clean_page_texts(page_texts: Sequence) -> list:
-    """The pages' text without running headers, footers and page numbers, with words split across lines joined.
+    """The pages' text without running headers, footers and page numbers, with words split across lines joined and
+    heading lines kept out of the sentences after them.
 
     A paper's running header ("Journal of X 12 (2019) 345-356", "Author et al.") would otherwise be read as part of
     the sentences around it, and "evalu-\nation" would never match the paper's "evaluation"."""
+    # Ligatures ("ﬁ", "ﬂ") and superscript digits become plain letters and digits: "deﬁne" would never match the
+    # paper's "define", and a superscript citation "risk¹²" is read like "risk12".
+    page_texts = [unicodedata.normalize("NFKC", t or "") for t in page_texts]
     own = own_dois(page_texts)
     if own:                               # the paper's own DOI is not a citation in its text
         drop = lambda m: "" if m.group(1).rstrip(".,;)").lower() in own else m.group(0)  # noqa: E731
@@ -169,13 +216,14 @@ def clean_page_texts(page_texts: Sequence) -> list:
             for k in edges:
                 counts[k] = counts.get(k, 0) + 1
     repeated = {k for k, c in counts.items() if c >= max(3, REPEAT_SHARE * n)}
-    out = []
+    out, in_references = [], False
     for lines in pages:
         last = len(lines) - 1
         at_edge = lambda i: i < EDGE_LINES or i > last - EDGE_LINES  # noqa: E731
         kept = [x for i, x in enumerate(lines)
                 if not (at_edge(i) and (_edge_key(x) in repeated or PAGE_NUMBER.match(x)))]
-        out.append(HYPHEN_BREAK.sub(_join_hyphen, "\n".join(kept)))
+        page, in_references = close_headings(HYPHEN_BREAK.sub(_join_hyphen, "\n".join(kept)), in_references)
+        out.append(page)
     return out
 
 
