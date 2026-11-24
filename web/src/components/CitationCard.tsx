@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { post } from "../api";
-import { abstractOnly, conf, displayOutcome, freeCopyUrl, noFreeFullText, outcome, OUTCOME_CLASS, STEP_LABEL } from "../format";
+import { abstractOnly, conf, displayOutcome, freeCopyUrl, noFreeFullText, outcome, OUTCOME_CLASS, shownScore, STEP_LABEL } from "../format";
 import type { Citation, Summary } from "../types";
 import Judgement from "./Judgement";
 
@@ -66,7 +66,7 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
         <span className={`pill ${OUTCOME_CLASS[o]}`}>{displayOutcome(c)}</span>
         <span className="cite-marker">{c.marker || "claim"}</span>
         <span className="cite-claim">{c.claim}</span>
-        {v && <span className="cite-conf" title="Model confidence (not calibrated yet)">{conf(v.confidence)}</span>}
+        {v && <span className="cite-conf" title={shownScore(v).title}>{shownScore(v).text}</span>}
         <span className={`chev ${open ? "up" : ""}`} aria-hidden="true">⌄</span>
       </button>
 
@@ -79,12 +79,13 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
 
           {(c.paper || c.reference_text) && (
             <div className="field">
-              <div className="field-label">{c.paper ? "Paper we read" : "Reference"}</div>
+              <div className="field-label">{c.paper ? (c.paper.source === "web" ? "Page we read" : "Paper we read") : "Reference"}</div>
               {c.paper ? (
                 <p>
                   {c.paper.url ? <a href={c.paper.url} target="_blank" rel="noreferrer">{c.paper.title}</a> : c.paper.title}
                   {c.paper.year ? <span className="muted"> · {c.paper.year}</span> : null}
                   {c.abstract_pasted ? <span className="tag">{c.pasted_kind === "passage" ? "passage you pasted" : "abstract you pasted"}</span>
+                    : c.full_text_source === "web page" ? <span className="tag">web page in the reference</span>
                     : c.read_full_text ? <span className="tag">open-access full text</span>
                     : <span className="tag">{onlyAbstract ? "abstract only" : "abstract"}</span>}
                 </p>
@@ -115,7 +116,7 @@ export default function CitationCard({ c, runId, onUpdate, defaultOpen = false }
                 </p>
               ) : o === "Not enough evidence" && (
                 <p className="hint">
-                  The {c.read_full_text ? "paper" : c.abstract_pasted ? "text you pasted" : "abstract"} doesn't clearly say this either way. That does not mean your sentence is wrong.
+                  The {c.full_text_source === "web page" ? "page" : c.read_full_text ? "paper" : c.abstract_pasted ? "text you pasted" : "abstract"} doesn't clearly say this either way. That does not mean your sentence is wrong.
                 </p>
               )}
             </div>
