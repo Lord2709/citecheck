@@ -106,3 +106,42 @@ def test_left_and_right_page_headers_and_the_papers_own_doi_are_removed():
     cleaned = pc.clean_page_texts(pages)
     assert not any("COMMUNICATIONS BIOLOGY" in p or "s42003" in p for p in cleaned)
     assert cleaned[1].startswith("The beta cohort was studied3.")
+
+
+# A participant's paper (Session 11): figure labels and section headings ran into the next cited sentence.
+P06_PAGE = ("Feature importance is shown in Fig. 3.\n"
+            "XGBoost model\n"
+            "Feature importance score\n"
+            "B. Machine Learning models\n"
+            "1) Random Forest: Random Forest (RF) is an ensemble of\n"
+            "decision trees trained on bootstrap samples [12].\n"
+            "II. RELATED WORK\n"
+            "Honeypots and honeynets have been used to study IoT attacks [4].")
+
+
+def test_headings_and_figure_labels_stay_out_of_cited_sentences():
+    from src.claims import parse_draft
+    text = "\n".join(pc.clean_page_texts([P06_PAGE]))
+    claims = parse_draft(text + "\nReferences\n[4] A. Author. Honeypots. 2019.\n[12] B. Author. Forests. 2001.").claims
+    assert [c.claim for c in claims] == [
+        "Random Forest: Random Forest (RF) is an ensemble of decision trees trained on bootstrap samples.",
+        "Honeypots and honeynets have been used to study IoT attacks."]
+
+
+def test_ordinary_lines_are_left_alone():
+    page = ("Federated learning keeps the data on each device and shares only\n"
+            "Model updates with the server [3]. It was first proposed at Google in\n"
+            "Mountain View")
+    out = pc.close_headings(page)[0]
+    assert out == page                                   # long lines, and a short line after an unfinished sentence
+
+
+def test_nothing_is_changed_after_the_reference_heading():
+    out, in_refs = pc.close_headings("Body text ends here.\nReferences\n[1] A. Author\nDeep Learning\nMIT Press")
+    assert in_refs and out.endswith("[1] A. Author\nDeep Learning\nMIT Press")
+    assert pc.close_headings("Smith J\nTitle Words", in_references=True)[0] == "Smith J\nTitle Words"
+
+
+def test_ligatures_and_superscript_digits_become_plain_text():
+    out = pc.clean_page_texts(["We deﬁne the ﬂow of data, as shown before¹²."])[0]
+    assert out == "We define the flow of data, as shown before12."

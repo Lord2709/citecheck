@@ -43,6 +43,8 @@ MAX_RANGE = 30
 AUTHOR_ENTRY = re.compile(r"^\s*[A-Z][A-Za-z\-'’]+,?\s+(?:[A-Z]\.|[A-Z][a-z]+,|[A-Z]{1,3}[,.])")
 ID_IN_LINE = re.compile(r"\b10\.\d{4,9}/|arxiv:?\s*\d{4}\.\d{4,5}|https?://", re.I)
 MIN_TAIL_ENTRIES = 2
+# A run-in list number at the start of a sentence ("1) Random Forest: ...", "(b) ...") is not part of the claim.
+LEADING_ENUMERATOR = re.compile(r"^\s*(?:\(?\d{1,2}\)|\(?[a-z]\))\s+")
 
 
 @dataclass
@@ -225,7 +227,7 @@ def _strip_markers(sentence: str, markers: list) -> str:
         else:
             s = s.replace(m, "")
     s = re.sub(r"\(\s*(?:doi:?)?\s*\)", "", s, flags=re.I)
-    return clean_context(s)
+    return clean_context(LEADING_ENUMERATOR.sub("", s))
 
 
 def resolve_key(key: str, refs: dict) -> Optional[str]:
