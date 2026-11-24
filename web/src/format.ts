@@ -1,4 +1,4 @@
-import type { Citation } from "./types";
+import type { Citation, Verdict } from "./types";
 
 export type Outcome = "Supported" | "Contradicted" | "Not enough evidence" | "Could not check";
 
@@ -42,6 +42,18 @@ export function conf(x: number | null | undefined): string {
   return x >= 0.995 ? "≥ 0.99" : x.toFixed(2);
 }
 
+// The score shown next to a verdict.  A "not enough evidence" verdict's confidence is 1 - (strongest evidence), so a
+// verdict where the model found almost nothing read as "≥ 0.99"; show the strongest evidence instead.
+export function shownScore(v: Verdict): { text: string; title: string } {
+  if (v.label === "NEI") {
+    const scores = (v.evidence ?? []).map((e) => Math.max(e.probs?.support ?? 0, e.probs?.contradict ?? 0));
+    const top = scores.length ? Math.max(...scores) : null;
+    return { text: `strongest ${conf(top)}`,
+             title: "The strongest support or contradiction the model found; below the threshold, so not enough evidence" };
+  }
+  return { text: conf(v.confidence), title: "Model confidence (not calibrated yet)" };
+}
+
 // Only follow ?next= to a path on this site: "/check" yes; "//evil.example", "/\\evil.example" or "https://..." no.
 export function safeNext(next: string | null, fallback = "/check"): string {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.includes("\\") || /[\u0000-\u001f]/.test(next)) return fallback;
@@ -68,4 +80,6 @@ export const STEP_LABEL: Record<string, string> = {
   "abstract pasted": "You pasted the abstract",
   "passage pasted": "You pasted a passage",
   "free copy": "A free copy exists, but its site refused our download",
+  "read web page": "Read the web page in the reference",
+  "verify web page": "Checked against the web page",
 };

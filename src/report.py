@@ -23,7 +23,8 @@ OUTCOME = {  # what the researcher sees for each checked citation
 
 
 CONF_NOTE = ("Confidences are the model's scores and are not calibrated yet: \"≥ 0.99\" means the model is very sure, "
-             "not that it is right.")
+             "not that it is right. For \"not enough evidence\" the score shown is the strongest support or "
+             "contradiction the model found, which stayed below the threshold.")
 
 
 def fmt_conf(c) -> str:
@@ -32,6 +33,22 @@ def fmt_conf(c) -> str:
         return "-"
     c = float(c)
     return "≥ 0.99" if c >= 0.995 else f"{c:.2f}"
+
+
+def strongest_evidence(v: dict):
+    """The strongest support or contradiction probability among a verdict's evidence (None without evidence)."""
+    scores = [max(e["probs"].get("support", 0.0), e["probs"].get("contradict", 0.0))
+              for e in (v.get("evidence") or []) if e.get("probs")]
+    return max(scores) if scores else None
+
+
+def shown_score(v: dict) -> str:
+    """What the report shows next to a verdict.  A "not enough evidence" verdict carries 1 - (strongest evidence) as its
+    confidence, so a verdict where the model saw almost nothing read as "≥ 0.99" (a participant read that as the model
+    being sure, Session 11); it now shows the strongest evidence itself."""
+    if v.get("label") == "NEI":
+        return f"strongest evidence {fmt_conf(strongest_evidence(v))}"
+    return f"confidence {fmt_conf(v.get('confidence'))}"
 
 
 NUMBER = re.compile(r"\d")
@@ -126,7 +143,8 @@ def table_rows(report: dict) -> list:
             "Claim": c.get("claim", ""),
             "Cited paper": p.get("title") or c.get("reference_text", "")[:80],
             "Outcome": display_outcome(c),
-            "Confidence": fmt_conf(v["confidence"]) if v.get("confidence") is not None else None,
+            "Confidence": (f"strongest {fmt_conf(strongest_evidence(v))}" if v.get("label") == "NEI"
+                           else fmt_conf(v["confidence"])) if v.get("confidence") is not None else None,
             "Read full text": "yes" if c.get("read_full_text") else "",
             "Suggestion": (c["suggestions"][0]["paper"].get("title") if c.get("suggestions") else ""),
             "Note": c.get("status_detail", "") if c.get("status") != "checked" else "",
@@ -181,10 +199,11 @@ def draft_to_markdown(report: dict) -> str:
         if c.get("status") != "checked":
             block.append(f"**Why it could not be checked:** {c.get('status_detail') or STATUS_TEXT.get(c.get('status'), '')}")
         if v:
-            source = (" after reading the open-access full text" if c.get("read_full_text")
+            source = (" from the web page in the reference" if c.get("full_text_source") == "web page"
+                      else " after reading the open-access full text" if c.get("read_full_text")
                       else f" from the {c.get('pasted_kind') or 'abstract'} you pasted" if c.get("abstract_pasted")
                       else " from the abstract")
-            block.append(f"**Verdict:** {v.get('display_label')} (confidence {fmt_conf(v.get('confidence'))}){source}")
+            block.append(f"**Verdict:** {v.get('display_label')} ({shown_score(v)}){source}")
             if display_outcome(c) == "Not in the abstract":
                 st = ft_status(c)
                 note = (ABSTRACT_ONLY_OFF_NOTE if st == "off"

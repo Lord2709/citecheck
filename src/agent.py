@@ -4,6 +4,7 @@
 
 Verification, per cited claim:
     extract claim + reference -> resolve to DOI/arXiv -> fetch the paper -> verify on the abstract
+      (no paper found, but the reference has a web address: read that page and verify on it; src/webpage.py)
       -> unsure (abstained below tau)?  read the open-access full text, verify again          [decision 1]
       -> verdict below tau stays NOT ENOUGH EVIDENCE                                           [decision 2]
       -> contradicted or not enough evidence?  search for a replacement paper                  [decision 3]
@@ -29,6 +30,7 @@ from .evidence import LexicalSentenceScorer
 from .ingest import IngestError
 from .report import full_text_status
 from .schema import CONTRADICT, NEI, SUPPORT, Doc, Paper
+from .webpage import WebPageError, fetch_page, reference_url
 
 CHUNK_SENTENCES = 5          # full text is judged in passages of this many sentences
 MAX_CHUNKS = 8               # ...the best-matching passages only (cost: one verifier call per passage)
@@ -257,6 +259,33 @@ class CiteCheckAgent:
                          if pool else "no candidate papers with an abstract found")
         return self._timed(steps, "search for a replacement", run)
 
+    # ---- a reference that is a web page --------------------------------------------------------
+    def _check_web_page(self, r: "CitationResult", claim: str, entry_text: str, why_no_paper: str) -> bool:
+        """A reference with no DOI, arXiv id or Crossref match, but with a web address: read that page and judge the
+        claim against it like a full text.  True when the citation was handled (checked, or why the page could not
+        be read); False when there is no address to read, or full-text reading is off."""
+        url = reference_url(entry_text)
+        session = getattr(self.fetcher, "session", None)
+        if not url or not self.escalate or session is None:
+            return False
+        try:
+            page = self._timed(r.steps, "read web page", lambda: (
+                (pg := fetch_page(url, session)), f"{len(pg.sentences)} sentences from {pg.url}"))
+        except WebPageError as e:
+            r.steps.append(Step("read web page", f"could not read {url}: {e}", 0.0))
+            r.status, r.status_detail = "unresolved", f"{why_no_paper}; the web page in the reference could not be read ({e})"
+            return True
+        paper = Paper(paper_id=f"web:{page.url}", title=page.title[:200], url=page.url, venue="web page", source="web")
+        try:
+            v = self._timed(r.steps, "verify web page", lambda: (
+                (x := self._verify_full_text(claim, paper, page.sentences)), f"{x.display_label} (p={x.confidence:.2f})"))
+        except Exception as e:
+            r.status, r.status_detail = "error", f"{type(e).__name__}: {str(e)[:120]}"
+            return True
+        r.paper, r.status, r.status_detail = paper, "checked", ""
+        r.verdict, r.read_full_text, r.full_text_source = v, True, "web page"
+        return True
+
     # ---- a whole draft ------------------------------------------------------------------------
     def _fetch(self, identifier: str, cache: dict):
         if identifier in cache:
@@ -318,7 +347,8 @@ class CiteCheckAgent:
                 res = self._timed(r.steps, "resolve reference", lambda: ((x := self.resolver.resolve(entry.text)), x.detail))
                 r.identifier = res.identifier
                 if res.identifier is None:
-                    r.status, r.status_detail = "unresolved", res.detail
+                    if not self._check_web_page(r, c.claim, entry.text, res.detail):
+                        r.status, r.status_detail = "unresolved", res.detail
                     finish(r)
                     continue
             if self.fetcher is None:
