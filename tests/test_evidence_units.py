@@ -118,3 +118,12 @@ def test_train_and_evaluate_each_unit(fixture_dir, tmp_path, unit):
                                 extra=["--model", str(out), "--device", "cpu", "--tune-n", "3", "--evidence-unit", unit]))
     assert r["config"]["evidence_unit"] == unit and r["config"]["trained_on_unit"] == unit
     assert f"[{unit}]" in (tmp_path / "res" / "LATEST.md").read_text()
+
+
+def test_contradict_boost_multiplies_the_contradict_weight_only():
+    idx = {"support": 0, "neutral": 1, "contradict": 2}
+    counts = {"support": 720, "neutral": 859, "contradict": 397}
+    base = finetune_nli.class_weight_list(counts, idx, 1976)
+    boosted = finetune_nli.class_weight_list(counts, idx, 1976, contradict_boost=2.0)
+    assert boosted[:2] == base[:2] and boosted[2] == 2 * base[2]
+    assert finetune_nli.class_weight_list(counts, idx, 1976, mode="none", contradict_boost=1.5) == [1.0, 1.0, 1.5]
