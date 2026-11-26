@@ -69,3 +69,15 @@ def test_bootstrap_and_paired():
     assert d["diff"] > 0.5 and d["p_a_better"] == 1.0 and d["ci95"][0] > 0
     same = M.paired_bootstrap_diff(yt, yt, yt, n_boot=50)
     assert same["diff"] == 0 and same["p_a_better"] == 0.0
+
+
+def test_calibration_reliability_and_ece():
+    from eval.calibration import reliability
+    preds = ([{"gold": "SUPPORT", "pred": "SUPPORT", "confidence": 0.995}] * 3
+             + [{"gold": "NEI", "pred": "SUPPORT", "confidence": 0.995}]
+             + [{"gold": "CONTRADICT", "pred": "CONTRADICT", "confidence": 0.65}]
+             + [{"gold": "NEI", "pred": "NEI", "confidence": 0.99}])          # NEI verdicts are not counted
+    r = reliability(preds)
+    assert r["n_judged"] == 5 and r["wrong_at_0_99_or_more"] == 1
+    # bin 0.99-1: confidence 0.995, accuracy 0.75 -> gap 0.245 (weight 4/5); bin 0.6-0.7: gap 0.35 (weight 1/5)
+    assert abs(r["ece"] - (0.8 * 0.245 + 0.2 * 0.35)) < 1e-9

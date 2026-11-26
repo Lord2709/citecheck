@@ -50,7 +50,7 @@ from src.data_io import (
 from src.evidence import EVIDENCE_UNITS, build_sentence_scorer, score_claim_docs, selection_recall
 from src.nli import DEFAULT_NLI_MODEL, build_verifier
 from src.retrieval import build_retriever
-from src.schema import Hit, LABELS, NEI, Probs
+from src.schema import CONTRADICT, Hit, LABELS, NEI, Probs
 from src.verdict import decide, doc_level_labels
 
 TAU_GRID = [round(x, 2) for x in np.arange(0.05, 1.0, 0.05)]
@@ -202,11 +202,11 @@ def _probs(doc):
     return Probs(**doc["probs"])
 
 
-def predict(outputs, tau, margin=0.0):
+def predict(outputs, tau, margin=0.0, tau_contradict=None):
     preds = []
     for o in outputs:
         dp = [_probs(d) for d in o["docs"]]
-        dec = decide(dp, tau=tau, margin=margin)
+        dec = decide(dp, tau=tau, margin=margin, tau_contradict=tau_contradict)
         preds.append(
             {
                 "id": o["id"],
@@ -358,6 +358,28 @@ def tune_tau(outputs, margin=0.0, fs_cap=None):
     return best
 
 
+CONTRADICT_MIN_GAIN = 0.01   # a lower CONTRADICT threshold must beat tau by this much on the tuning claims
+
+
+def tune_tau_contradict(outputs, tau, margin=0.0, fs_cap=None, min_gain=CONTRADICT_MIN_GAIN):
+    """With tau fixed, pick the CONTRADICT threshold (at most tau) that maximises macro-F1 on the tuning outputs.
+
+    Lowering it only turns NOT ENOUGH EVIDENCE into CONTRADICTS, so false-SUPPORT cannot rise; fs_cap is still
+    checked.  tau itself is kept unless a lower value gains at least min_gain macro-F1 on these claims (with ~200
+    tuning claims, smaller differences are noise).  Ties go to the larger (more cautious) threshold."""
+    rows = []
+    for tc in [t for t in TAU_GRID if t <= tau + 1e-9]:
+        preds = [p for p in predict(outputs, tau, margin, tc) if p["gold"] in LABELS]
+        yt, yp = [p["gold"] for p in preds], [p["pred"] for p in preds]
+        rows.append({"tau_contradict": tc, "macro_f1": M.macro_f1(yt, yp), "false_support_rate": M.false_support_rate(yt, yp),
+                     "contradict_recall": M.prf_per_class(yt, yp, LABELS)[CONTRADICT]["recall"]})
+    ok = [r for r in rows if fs_cap is None or r["false_support_rate"] <= fs_cap] or rows
+    at_tau = min(ok, key=lambda r: abs(r["tau_contradict"] - tau))
+    best = max(ok, key=lambda r: (round(r["macro_f1"], 12), r["tau_contradict"]))
+    chosen = best if best["macro_f1"] >= at_tau["macro_f1"] + min_gain else at_tau
+    return {**chosen, "kept_tau": chosen is at_tau, "min_gain": min_gain, "grid": rows}
+
+
 # --------------------------------------------------------------------------- #
 # Provenance
 # --------------------------------------------------------------------------- #
@@ -426,6 +448,8 @@ def build_parser():
     p.add_argument("--out", default="eval/results")
     p.add_argument("--no-cache", action="store_true")
     p.add_argument("--promote", action="store_true", help="write eval/results/deployed_config.json for the app")
+    p.add_argument("--tune-contradict", action="store_true",
+                   help="also tune a separate (lower) CONTRADICT threshold on the same tuning claims")
     p.add_argument("--reasoner", default=None, help="stage 2: local instruction LLM (HF id or folder) for the hybrid reasoner")
     p.add_argument("--reasoner-mode", default="hybrid", choices=["hybrid", "checks", "llm"])
     p.add_argument("--escalate", default="not-confident", choices=ESCALATE, help="which claims stage 2 re-judges")
@@ -484,6 +508,9 @@ def run(args) -> dict:
 
     # ---- tau: tuned on TRAIN, never on the split we report ---------------------------------
     tuning = {"method": "fixed", "split": None}
+    tau_contradict = None
+    if args.tune_contradict and (args.tau is not None or args.tune_split == "none"):
+        sys.exit("--tune-contradict tunes on the training claims; drop --tau / --tune-split none.")
     if args.tau is not None:
         tau = args.tau
     elif spec.lower() == "majority" or args.tune_split == "none":
@@ -527,11 +554,15 @@ def run(args) -> dict:
         }
         if split_info:
             tuning.update(split_info)
+        if args.tune_contradict:
+            tc = tune_tau_contradict(tune_out, tau, args.margin, args.tune_fs_cap)
+            tau_contradict = tc["tau_contradict"]
+            tuning["contradict"] = tc
 
     # ---- end-to-end ------------------------------------------------------------------------
     e2e = get(args.split, claims, "e2e")
     outputs = e2e["outputs"]
-    preds = predict(outputs, tau, args.margin)
+    preds = predict(outputs, tau, args.margin, tau_contradict)
     reasoner, stage2 = None, {}
     if args.reasoner:
         if args.promote:
@@ -552,7 +583,7 @@ def run(args) -> dict:
         "config": {
             "retriever": retriever.name, "embed_model": args.embed_model, "verifier": verifier.name, "k": args.k,
             "sentences_per_paper": args.sentences, "evidence_unit": args.evidence_unit, "sentence_scorer": args.sentence_scorer,
-            "tau": tau, "margin": args.margin,
+            "tau": tau, "margin": args.margin, "tau_contradict": tau_contradict,
         },
         "tau_tuning": tuning,
         "data": {"dir": str(data_dir), "sha256_prefix": data_hash, "n_corpus": len(corpus),
@@ -585,7 +616,7 @@ def run(args) -> dict:
         att = {"end_to_end": results["claim_level"]["macro_f1"]}
         for mode in ("oracle_doc", "oracle_rationale"):
             o = get(args.split, claims, mode)["outputs"]
-            mode_preds = predict(o, tau, args.margin)
+            mode_preds = predict(o, tau, args.margin, tau_contradict)
             if reasoner is not None and mode == "oracle_doc":
                 stage2["oracle_doc"] = apply_reasoner(mode_preds, o, corpus_by_id, reasoner, args.escalate,
                                                       args.split, not args.no_cache)
@@ -796,6 +827,7 @@ def promote(out_root: Path, results: dict, args):
         "sentence_scorer": args.sentence_scorer,
         "tau": results["config"]["tau"],
         "margin": args.margin,
+        "tau_contradict": results["config"].get("tau_contradict"),
         "dev_macro_f1": results["claim_level"]["macro_f1"],
         "dev_macro_f1_ci95": results["claim_level"]["macro_f1_ci95"],
         "dev_false_support_rate": results["claim_level"]["false_support_rate"],

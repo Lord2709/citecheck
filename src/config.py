@@ -18,7 +18,7 @@ from typing import Optional
 DEPLOYED_PATH = Path("eval/results/deployed_config.json")
 
 _MODEL_FIELDS = ("retriever", "embed_model", "verifier", "k", "sentences_per_paper", "evidence_unit", "sentence_scorer",
-                 "tau", "margin")
+                 "tau", "margin", "tau_contradict")
 
 
 @dataclass
@@ -32,6 +32,7 @@ class Config:
     evidence_unit: str = "window"  # window | abstract | sentence (src/evidence.py)
     tau: float = 0.5
     margin: float = 0.0
+    tau_contradict: Optional[float] = None  # threshold for CONTRADICT (None = tau); tuned by run_eval --tune-contradict
     data_dir: str = "data/scifact"
     citation_gate: bool = False  # skip citing "sentences" that are not claims (src/citation_gate.py); audit only, experimental
     audit_all_contexts: bool = False  # audit EVERY sentence citing a paper (may give PARTLY SUPPORTED); off = first only
@@ -74,6 +75,7 @@ def load_config(deployed_path: Path = DEPLOYED_PATH) -> Config:
         "CITECHECK_SENTENCE_SCORER": ("sentence_scorer", str),
         "CITECHECK_TAU": ("tau", float),
         "CITECHECK_MARGIN": ("margin", float),
+        "CITECHECK_TAU_CONTRADICT": ("tau_contradict", float),
     }
     for var, (attr, cast) in env_map.items():
         v = _env(var, cast)
