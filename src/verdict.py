@@ -22,28 +22,36 @@ class Decision:
     note: str = ""
 
 
-def decide(doc_probs: Sequence, tau: float = 0.5, margin: float = 0.0) -> Decision:
+def decide(doc_probs: Sequence, tau: float = 0.5, margin: float = 0.0,
+           tau_contradict: Optional[float] = None) -> Decision:
     """doc_probs: list[Probs], one per retrieved paper.
 
     * best_support / best_contradict = highest class probability over papers.
-    * If neither reaches tau                    -> NEI (abstain, "below threshold").
-    * If both reach tau and are within `margin` -> NEI (abstain, "conflicting evidence").
+    * SUPPORT needs best_support >= tau; CONTRADICT needs best_contradict >= tau_contradict (default: tau) AND
+      best_contradict > best_support.  A lower tau_contradict catches more contradictions without ever turning a
+      verdict into SUPPORT, so the false-SUPPORT rate cannot rise.
+    * If neither qualifies                      -> NEI (abstain, "below threshold").
+    * If both qualify and are within `margin`   -> NEI (abstain, "conflicting evidence").
     * Otherwise the stronger of the two wins.
-    NEI confidence is reported as 1 - (strongest non-neutral probability).
+    NEI confidence is reported as 1 - (strongest non-neutral probability); the site shows the strongest probability
+    itself, so a "not enough evidence" verdict never reads as "0.99 sure".
     """
     if not doc_probs:
         return Decision(NEI, 1.0, None, True, "no evidence retrieved")
+    tc = tau if tau_contradict is None else tau_contradict
     si = max(range(len(doc_probs)), key=lambda i: doc_probs[i].support)
     ci = max(range(len(doc_probs)), key=lambda i: doc_probs[i].contradict)
     s, c = doc_probs[si].support, doc_probs[ci].contradict
     top = max(s, c)
-    if top < tau:
-        return Decision(NEI, 1.0 - top, None, True, f"strongest evidence {top:.2f} is below threshold {tau:.2f}")
-    if s >= tau and c >= tau and abs(s - c) < margin:
+    s_ok, c_ok = s >= tau, c >= tc and c > s
+    if not (s_ok or c_ok):
+        limit = f"{tau:.2f}" if tc == tau else f"{tau:.2f} (support) / {tc:.2f} (contradiction)"
+        return Decision(NEI, 1.0 - top, None, True, f"strongest evidence {top:.2f} is below threshold {limit}")
+    if s >= tau and c >= tc and abs(s - c) < margin:
         return Decision(NEI, 1.0 - top, None, True, "papers disagree with similar strength")
-    if s >= c:
-        return Decision(SUPPORT, s, si, False)
-    return Decision(CONTRADICT, c, ci, False)
+    if c_ok:
+        return Decision(CONTRADICT, c, ci, False)
+    return Decision(SUPPORT, s, si, False)
 
 
 def doc_level_labels(doc_probs: Sequence, tau: float = 0.5) -> list:

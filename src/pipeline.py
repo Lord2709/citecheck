@@ -37,6 +37,7 @@ class CiteCheckPipeline:
         self.citation_gate = False  # src/citation_gate: skip contexts that are not claims before verifying (experimental)
         self.audit_all_contexts = False  # check every citing sentence; False = only the first (the Session 5 behaviour)
         self.audit_tau = None  # abstain threshold for the citation audit; None = the claim checker's tau
+        self.tau_contradict = None  # CONTRADICT threshold (None = tau); only with the pipeline's own tau
         self.meta = meta or {}
         self.warnings = warnings or []
 
@@ -61,7 +62,8 @@ class CiteCheckPipeline:
         else:
             hits = [Hit(d, 0.0, i + 1) for i, d in enumerate(docs)]
         scored = score_claim_docs([(claim, hits)], self.verifier, self.scorer, m=self.m, unit=self.evidence_unit)[0]
-        dec = decide([s.probs for s in scored], tau=self.tau if tau is None else tau, margin=self.margin)
+        dec = decide([s.probs for s in scored], tau=self.tau if tau is None else tau, margin=self.margin,
+                     tau_contradict=self.tau_contradict if tau is None else None)
 
         strength = lambda i: max(scored[i].probs.support, scored[i].probs.contradict)  # noqa: E731
         order = sorted(range(len(scored)), key=lambda i: -strength(i))
@@ -227,6 +229,8 @@ def build_pipeline(cfg: Optional[Config] = None, allow_fallback: bool = True) ->
     pipe = CiteCheckPipeline(verifier, retriever, scorer, cfg.k, cfg.sentences_per_paper, cfg.tau, cfg.margin, meta, warnings,
                              evidence_unit=cfg.evidence_unit)
     pipe.citation_gate, pipe.audit_tau = cfg.citation_gate, cfg.audit_tau
+    pipe.tau_contradict = cfg.tau_contradict
+    meta["tau_contradict"] = cfg.tau_contradict
     pipe.audit_all_contexts = cfg.audit_all_contexts
     meta["audit_tau"] = cfg.audit_tau
     if cfg.claim_extractor:  # loads lazily on the first audit; a failure falls back to whole sentences, with a warning

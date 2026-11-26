@@ -261,3 +261,23 @@ def test_tune_tau_with_a_false_support_cap():
 def test_run_records_the_fs_cap(fixture_dir, tmp_path):
     r = run_eval.main(base_args(fixture_dir, tmp_path, "capped", extra=["--tune-fs-cap", "0.1"]))
     assert r["tau_tuning"]["fs_cap"] == 0.1 and r["tau_tuning"]["met_fs_cap"] in (True, False)
+
+
+def test_tune_tau_contradict_keeps_tau_unless_a_lower_threshold_clearly_helps():
+    def out(gold, s, c):
+        return {"id": 0, "gold_label": gold,
+                "docs": [{"doc_id": "d", "probs": {"support": s, "neutral": 1 - s - c, "contradict": c}}]}
+
+    weak_contradictions = [out("CONTRADICT", 0.05, 0.3)] * 4 + [out("SUPPORT", 0.9, 0.0)] * 4 + [out("NEI", 0.1, 0.05)] * 4
+    r = run_eval.tune_tau_contradict(weak_contradictions, tau=0.5)
+    assert r["tau_contradict"] < 0.5 and r["kept_tau"] is False and r["contradict_recall"] == 1.0
+    assert all(row["false_support_rate"] == r["false_support_rate"] for row in r["grid"])   # cannot change
+    nothing_to_gain = [out("SUPPORT", 0.9, 0.0)] * 4 + [out("NEI", 0.1, 0.2)] * 4
+    assert run_eval.tune_tau_contradict(nothing_to_gain, tau=0.5)["tau_contradict"] == 0.5
+
+
+def test_run_with_tune_contradict_records_and_uses_it(fixture_dir, tmp_path):
+    r = run_eval.main(base_args(fixture_dir, tmp_path, "tc", extra=["--tune-contradict"]))
+    assert "contradict" in r["tau_tuning"] and r["config"]["tau_contradict"] == r["tau_tuning"]["contradict"]["tau_contradict"]
+    with pytest.raises(SystemExit):
+        run_eval.main(base_args(fixture_dir, tmp_path, "tc2", extra=["--tune-contradict", "--tau", "0.5"]))

@@ -53,6 +53,17 @@ def test_confidence_display_and_no_run_on_lines():
     assert report.table_rows(DRAFT)[0]["Confidence"] == "0.91"
 
 
+def test_not_enough_evidence_shows_the_strongest_evidence_not_one_minus_it():
+    v = {"label": "NEI", "display_label": "NOT ENOUGH EVIDENCE", "confidence": 0.99,
+         "evidence": [{"probs": {"support": 0.004, "neutral": 0.99, "contradict": 0.006}},
+                      {"probs": {"support": 0.01, "neutral": 0.98, "contradict": 0.002}}]}
+    assert report.strongest_evidence(v) == 0.01 and report.shown_score(v) == "strongest evidence 0.01"
+    assert report.shown_score({"label": "NEI", "confidence": 1.0, "evidence": []}) == "strongest evidence -"
+    assert report.shown_score({"label": "SUPPORT", "confidence": 0.91}) == "confidence 0.91"
+    c = {"index": 1, "marker": "[1]", "claim": "c", "status": "checked", "paper": {"title": "T"}, "verdict": v}
+    assert report.table_rows({"kind": "draft_check", "citations": [c]})[0]["Confidence"] == "strongest 0.01"
+
+
 def test_abstract_only_verdicts_are_said_plainly():
     nei = {"index": 4, "marker": "[4]", "sentence": "It cuts energy use by 37% [4].",
            "claim": "It cuts energy use by 37%.",

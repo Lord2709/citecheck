@@ -59,3 +59,37 @@ def test_score_claim_docs_batches_and_overrides(fixture_dir):
     assert out[1][0].probs.label == CONTRADICT            # "reduced" vs "raises": direction flip
     forced = score_claim_docs(items[:1], MajorityVerifier(), scorer, gold_sentences=[{docs[0].doc_id: [4]}])
     assert forced[0][0].sentence_idxs == [4]              # oracle override is honoured
+
+
+def test_a_separate_contradict_threshold():
+    weak_c = [P(0.2, 0.45, 0.35)]
+    assert decide(weak_c, tau=0.5).label == NEI
+    d = decide(weak_c, tau=0.5, tau_contradict=0.3)
+    assert d.label == CONTRADICT and d.confidence == 0.35
+    # never CONTRADICT when support is the stronger reading, and never more SUPPORT
+    assert decide([P(0.45, 0.2, 0.35)], tau=0.5, tau_contradict=0.3).label == NEI
+    assert decide([P(0.6, 0.0, 0.4)], tau=0.5, tau_contradict=0.3).label == SUPPORT
+    # with tau_contradict == tau (or None) every decision is the same as before
+    import itertools
+    grid = [i / 10 for i in range(11)]
+    for s, c in itertools.product(grid, grid):
+        if s + c <= 1:
+            p = [P(s, 1 - s - c, c)]
+            assert decide(p, 0.5).label == decide(p, 0.5, tau_contradict=0.5).label
+    assert "0.30 (contradiction)" in decide([P(0.1, 0.8, 0.1)], tau=0.5, tau_contradict=0.3).note
+
+
+def test_the_contradict_threshold_comes_from_the_deployed_config(tmp_path, monkeypatch):
+    import json
+
+    from src.config import load_config
+
+    monkeypatch.delenv("CITECHECK_TAU_CONTRADICT", raising=False)
+    dep = tmp_path / "deployed_config.json"
+    dep.write_text(json.dumps({"verifier": "lexical", "tau": 0.5, "tau_contradict": 0.3}))
+    assert load_config(dep).tau_contradict == 0.3
+    dep.write_text(json.dumps({"verifier": "lexical", "tau": 0.5}))
+    assert load_config(dep).tau_contradict is None
+    monkeypatch.setenv("CITECHECK_TAU_CONTRADICT", "0.35")
+    cfg = load_config(dep)
+    assert cfg.tau_contradict == 0.35 and "CITECHECK_TAU_CONTRADICT" in cfg.overrides
